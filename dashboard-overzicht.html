@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="nl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>VORTA Ultra - Dashboard Overzicht</title>
+    <style>
+      body {
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+        color: white;
+        margin: 0;
+        padding: 20px;
+      }
+      .container {
+        max-width: 1200px;
+        margin: 0 auto;
+        background: rgba(255, 255, 255, 0.1);
+        border-radius: 15px;
+        padding: 30px;
+        backdrop-filter: blur(10px);
+      }
+      h1 {
+        text-align: center;
+        color: #00ff88;
+        font-size: 2.5em;
+        margin-bottom: 30px;
+        text-shadow: 0 0 10px rgba(0, 255, 136, 0.5);
+      }
+      .dashboard-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+        gap: 20px;
+        margin-top: 30px;
+      }
+      .dashboard-card {
+        background: rgba(255, 255, 255, 0.15);
+        border-radius: 12px;
+        padding: 25px;
+        transition: all 0.3s ease;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+      }
+      .dashboard-card:hover {
+        transform: translateY(-5px);
+        background: rgba(255, 255, 255, 0.25);
+        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
+      }
+      .dashboard-card h3 {
+        color: #00ff88;
+        margin-bottom: 15px;
+        font-size: 1.3em;
+      }
+      .dashboard-card p {
+        margin-bottom: 20px;
+        line-height: 1.6;
+      }
+      .dashboard-link {
+        display: inline-block;
+        background: linear-gradient(45deg, #00ff88, #00cc6a);
+        color: #1e3c72;
+        padding: 12px 24px;
+        text-decoration: none;
+        border-radius: 8px;
+        font-weight: bold;
+        transition: all 0.3s ease;
+      }
+      .dashboard-link:hover {
+        transform: scale(1.05);
+        box-shadow: 0 5px 15px rgba(0, 255, 136, 0.4);
+      }
+      .status {
+        background: rgba(0, 255, 136, 0.2);
+        padding: 15px;
+        border-radius: 8px;
+        margin: 20px 0;
+        border-left: 4px solid #00ff88;
+      }
+      .credentials {
+        background: rgba(255, 193, 7, 0.2);
+        padding: 15px;
+        border-radius: 8px;
+        margin: 20px 0;
+        border-left: 4px solid #ffc107;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>🚀 VORTA Ultra - Monitoring Dashboards</h1>
+
+      <div class="credentials">
+        <h3>🔐 Login Gegevens:</h3>
+        <strong>Username:</strong> admin<br />
+        <strong>Password:</strong> VortaUltraAdmin2024!<br />
+        <strong>Grafana URL:</strong>
+        <a href="http://localhost:3000" target="_blank">http://localhost:3000</a>
+      </div>
+
+      <div class="status">
+        <h3>✅ Status:</h3>
+        ✅ Grafana: Actief op poort 3000<br />
+        ✅ Prometheus: Actief op poort 9090<br />
+        ✅ VORTA API: Actief op poort 8000<br />
+        ✅ Real-time Metrics: Operationeel
+      </div>
+
+      <div class="dashboard-grid">
+        <div class="dashboard-card">
+          <h3>📊 VORTA Ultra - Production Monitoring</h3>
+          <p>
+            Complete productie monitoring met real-time API request rates, voice processing
+            performance, en system health status.
+          </p>
+          <a
+            href="http://localhost:3000/d/ac2ad0fe-40b4-40bd-9a60-aaf9999999a6/vorta-ultra-production-monitoring-dashboard"
+            class="dashboard-link"
+            target="_blank"
+            >Open Dashboard</a
+          >
+        </div>
+
+        <div class="dashboard-card">
+          <h3>🎯 VORTA AI Platform - Production Dashboard</h3>
+          <p>
+            Gedetailleerde AI platform metrics met API health status, response times, en processing
+            volumes.
+          </p>
+          <a
+            href="http://localhost:3000/d/c1be2135-6f58-4afa-b5ee-fa3528247d2f/vorta-ai-platform-production-dashboard"
+            class="dashboard-link"
+            target="_blank"
+            >Open Dashboard</a
+          >
+        </div>
+
+        <div class="dashboard-card">
+          <h3>💼 VORTA AI - Business Intelligence</h3>
+          <p>
+            Business metrics met AI processing volumes, revenue impact, en GitHub workflow status.
+          </p>
+          <a
+            href="http://localhost:3000/d/eeeb950a-551f-46ca-8d70-1bcc96afe291/vorta-ai-business-intelligence-dashboard"
+            class="dashboard-link"
+            target="_blank"
+            >Open Dashboard</a
+          >
+        </div>
+
+        <div class="dashboard-card">
+          <h3>🔍 Prometheus Metrics Browser</h3>
+          <p>Direct toegang tot alle raw metrics en query interface voor custom analyses.</p>
+          <a href="http://localhost:9090" class="dashboard-link" target="_blank">Open Prometheus</a>
+        </div>
+
+        <div class="dashboard-card">
+          <h3>⚡ VORTA API Health Check</h3>
+          <p>Direct API status check en metrics endpoint voor real-time monitoring.</p>
+          <a href="http://localhost:8000/api/health" class="dashboard-link" target="_blank"
+            >API Health</a
+          >
+        </div>
+
+        <div class="dashboard-card">
+          <h3>📈 Raw Metrics Endpoint</h3>
+          <p>Prometheus-formatted metrics direct van de VORTA API voor integration testing.</p>
+          <a href="http://localhost:8000/metrics" class="dashboard-link" target="_blank"
+            >View Metrics</a
+          >
+        </div>
+      </div>
+
+      <div class="status" style="margin-top: 30px">
+        <h3>🎯 Live Metrics Overzicht:</h3>
+        • <strong>HTTP Requests:</strong> vorta_ultra_http_requests_total<br />
+        • <strong>Response Times:</strong> vorta_ultra_http_request_duration_seconds<br />
+        • <strong>Voice Processing:</strong> vorta_ultra_voice_processing_seconds<br />
+        • <strong>Active Connections:</strong> vorta_ultra_active_connections<br />
+        • <strong>System Health:</strong> up{job="vorta-api"}
+      </div>
+    </div>
+  </body>
+</html>

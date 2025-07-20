@@ -420,6 +420,15 @@ async def get_metrics():
     )
 
 
+@app.get("/metrics")
+async def get_metrics_root():
+    """Prometheus metrics endpoint (root path for compatibility)"""
+    return Response(
+        content=generate_latest(metrics_registry).decode('utf-8'),
+        media_type=CONTENT_TYPE_LATEST
+    )
+
+
 @app.get("/api/system/stats")
 async def system_stats():
     """Real-time system performance statistics"""

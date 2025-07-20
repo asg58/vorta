@@ -1,0 +1,142 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "VORTA Ultra - Production Monitoring Dashboard",
+    "tags": ["vorta", "production", "monitoring", "real-time"],
+    "style": "dark",
+    "timezone": "browser",
+    "editable": true,
+    "hideControls": false,
+    "graphTooltip": 1,
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "refresh": "15s",
+    "panels": [
+      {
+        "id": 1,
+        "title": "VORTA API Request Rate (Live)",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(vorta_ultra_http_requests_total[5m])",
+            "legendFormat": "{{endpoint}} {{method}}"
+          }
+        ],
+        "yAxes": [{ "label": "Requests/sec", "min": 0 }],
+        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 }
+      },
+      {
+        "id": 2,
+        "title": "Voice Processing Performance",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.5, rate(vorta_ultra_voice_processing_seconds_bucket[5m]))",
+            "legendFormat": "Median Processing Time"
+          },
+          {
+            "expr": "histogram_quantile(0.95, rate(vorta_ultra_voice_processing_seconds_bucket[5m]))",
+            "legendFormat": "95th Percentile"
+          }
+        ],
+        "yAxes": [{ "label": "Seconds", "min": 0 }],
+        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 }
+      },
+      {
+        "id": 3,
+        "title": "Active Connections",
+        "type": "singlestat",
+        "targets": [
+          {
+            "expr": "vorta_ultra_active_connections"
+          }
+        ],
+        "gridPos": { "h": 4, "w": 6, "x": 0, "y": 8 }
+      },
+      {
+        "id": 4,
+        "title": "Average Response Time",
+        "type": "singlestat",
+        "targets": [
+          {
+            "expr": "rate(vorta_ultra_http_request_duration_seconds_sum[5m]) / rate(vorta_ultra_http_request_duration_seconds_count[5m])"
+          }
+        ],
+        "valueName": "current",
+        "format": "s",
+        "gridPos": { "h": 4, "w": 6, "x": 6, "y": 8 }
+      },
+      {
+        "id": 5,
+        "title": "Total Requests (24h)",
+        "type": "singlestat",
+        "targets": [
+          {
+            "expr": "increase(vorta_ultra_http_requests_total[24h])"
+          }
+        ],
+        "gridPos": { "h": 4, "w": 6, "x": 12, "y": 8 }
+      },
+      {
+        "id": 6,
+        "title": "VORTA System Health",
+        "type": "singlestat",
+        "targets": [
+          {
+            "expr": "up{job=\"vorta-api\"}"
+          }
+        ],
+        "colorValue": true,
+        "thresholds": "0.5,1",
+        "colors": ["#d44a3a", "#e24d42", "#299c46"],
+        "gridPos": { "h": 4, "w": 6, "x": 18, "y": 8 }
+      },
+      {
+        "id": 7,
+        "title": "Request Duration Distribution",
+        "type": "heatmap",
+        "targets": [
+          {
+            "expr": "rate(vorta_ultra_http_request_duration_seconds_bucket[5m])",
+            "format": "heatmap",
+            "legendFormat": "{{le}}"
+          }
+        ],
+        "gridPos": { "h": 8, "w": 24, "x": 0, "y": 12 }
+      },
+      {
+        "id": 8,
+        "title": "VORTA Platform Metrics (Real-Time)",
+        "type": "table",
+        "targets": [
+          {
+            "expr": "vorta_ultra_http_requests_total",
+            "format": "table",
+            "instant": true
+          }
+        ],
+        "columns": [
+          { "text": "Endpoint", "value": "endpoint" },
+          { "text": "Method", "value": "method" },
+          { "text": "Requests", "value": "Value" }
+        ],
+        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 }
+      },
+      {
+        "id": 9,
+        "title": "Voice Processing Volume",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(vorta_ultra_voice_processing_seconds_count[5m]) * 60",
+            "legendFormat": "Requests per minute"
+          }
+        ],
+        "yAxes": [{ "label": "Requests/min", "min": 0 }],
+        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 }
+      }
+    ]
+  }
+}
