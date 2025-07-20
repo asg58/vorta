@@ -1,0 +1,658 @@
+name: ⚡ Performance Testing
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Run performance tests daily at 1 AM UTC
+    - cron: '0 1 * * *'
+  workflow_dispatch:
+    inputs:
+      test_type:
+        description: 'Type of performance test'
+        type: choice
+        options:
+          - load-test
+          - stress-test
+          - spike-test
+          - endurance-test
+          - baseline-test
+        default: 'load-test'
+      duration:
+        description: 'Test duration in seconds'
+        type: number
+        default: 300
+      users:
+        description: 'Number of concurrent users'
+        type: number
+        default: 100
+      environment:
+        description: 'Target environment'
+        type: choice
+        options:
+          - staging
+          - production
+        default: 'staging'
+
+env:
+  PYTHON_VERSION: '3.12.9'
+
+jobs:
+  # Environment health check
+  pre-test-health-check:
+    name: 🔍 Pre-test Health Check
+    runs-on: ubuntu-latest
+    outputs:
+      environment_healthy: ${{ steps.health.outputs.healthy }}
+      baseline_metrics: ${{ steps.baseline.outputs.metrics }}
+
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: 📦 Install Dependencies
+        run: |
+          pip install requests pydantic
+
+      - name: 🔍 Environment Health Check
+        id: health
+        run: |
+          ENVIRONMENT="${{ github.event.inputs.environment || 'staging' }}"
+
+          if [[ "$ENVIRONMENT" == "production" ]]; then
+            ENDPOINT="${{ vars.PRODUCTION_ENDPOINT || 'https://api.vorta.example.com' }}"
+            API_KEY="${{ secrets.PRODUCTION_API_KEY || 'demo-api-key' }}"
+          else
+            ENDPOINT="${{ vars.STAGING_ENDPOINT || 'https://staging-api.vorta.example.com' }}"
+            API_KEY="${{ secrets.STAGING_API_KEY || 'demo-staging-key' }}"
+          fi
+
+          echo "🔍 Checking health of $ENVIRONMENT environment..."
+
+          # Basic health check
+          HEALTH_RESPONSE=$(curl -s -f -X GET "$ENDPOINT/health" -H "Authorization: Bearer $API_KEY" || echo "failed")
+
+          if [[ "$HEALTH_RESPONSE" == "failed" ]]; then
+            echo "❌ Environment health check failed"
+            echo "healthy=false" >> $GITHUB_OUTPUT
+            exit 1
+          else
+            echo "✅ Environment is healthy"
+            echo "healthy=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: 📊 Collect Baseline Metrics
+        id: baseline
+        run: |
+          ENVIRONMENT="${{ github.event.inputs.environment || 'staging' }}"
+
+          if [[ "$ENVIRONMENT" == "production" ]]; then
+            ENDPOINT="${{ vars.PRODUCTION_ENDPOINT || 'https://api.vorta.example.com' }}"
+            API_KEY="${{ secrets.PRODUCTION_API_KEY || 'demo-api-key' }}"
+          else
+            ENDPOINT="${{ vars.STAGING_ENDPOINT || 'https://staging-api.vorta.example.com' }}"
+            API_KEY="${{ secrets.STAGING_API_KEY || 'demo-staging-key' }}"
+          fi
+
+          echo "📊 Collecting baseline performance metrics..."
+
+          # Quick baseline test (10 requests)
+          python scripts/performance/baseline_test.py \
+            --endpoint="$ENDPOINT" \
+            --api-key="$API_KEY" \
+            --requests=10 \
+            --output=baseline-metrics.json
+
+          # Store metrics as output
+          if [[ -f baseline-metrics.json ]]; then
+            METRICS=$(cat baseline-metrics.json | tr '\n' ' ')
+            echo "metrics=$METRICS" >> $GITHUB_OUTPUT
+          fi
+
+  # Load testing
+  load-test:
+    name: 📈 Load Testing
+    runs-on: ubuntu-latest
+    needs: pre-test-health-check
+    if: needs.pre-test-health-check.outputs.environment_healthy == 'true' && (github.event.inputs.test_type == 'load-test' || github.event.inputs.test_type == '' || github.event_name == 'schedule')
+
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: 📦 Install Performance Testing Tools
+        run: |
+          pip install locust requests pandas matplotlib seaborn
+
+      - name: ⚡ Execute Load Test
+        run: |
+          ENVIRONMENT="${{ github.event.inputs.environment || 'staging' }}"
+          DURATION="${{ github.event.inputs.duration || 300 }}"
+          USERS="${{ github.event.inputs.users || 100 }}"
+
+          if [[ "$ENVIRONMENT" == "production" ]]; then
+            ENDPOINT="${{ vars.PRODUCTION_ENDPOINT || 'https://api.vorta.example.com' }}"
+            API_KEY="${{ secrets.PRODUCTION_API_KEY || 'demo-api-key' }}"
+          else
+            ENDPOINT="${{ vars.STAGING_ENDPOINT || 'https://staging-api.vorta.example.com' }}"
+            API_KEY="${{ secrets.STAGING_API_KEY || 'demo-staging-key' }}"
+          fi
+
+          echo "⚡ Starting load test on $ENVIRONMENT..."
+          echo "  - Duration: ${DURATION}s"
+          echo "  - Users: $USERS"
+          echo "  - Endpoint: $ENDPOINT"
+
+          cd tests/performance
+
+          # Run locust load test
+          locust -f load_test.py \
+            --host="$ENDPOINT" \
+            --users="$USERS" \
+            --spawn-rate=10 \
+            --run-time="${DURATION}s" \
+            --headless \
+            --csv=load-test-results \
+            --html=load-test-report.html
+        env:
+          API_KEY: ${{ github.event.inputs.environment == 'production' && secrets.PRODUCTION_API_KEY || secrets.STAGING_API_KEY }}
+
+      - name: 📊 Analyze Load Test Results
+        run: |
+          cd tests/performance
+
+          echo "📊 Analyzing load test results..."
+
+          # Generate detailed analysis
+          python analyze_results.py \
+            --stats-file=load-test-results_stats.csv \
+            --history-file=load-test-results_stats_history.csv \
+            --output-dir=analysis/
+
+          # Create performance summary
+          python create_summary.py \
+            --test-type=load-test \
+            --results-dir=analysis/ \
+            --baseline="${{ needs.pre-test-health-check.outputs.baseline_metrics }}" \
+            --output=load-test-summary.md
+
+      - name: 📄 Upload Load Test Results
+        uses: actions/upload-artifact@v3
+        with:
+          name: load-test-results
+          path: |
+            tests/performance/load-test-results*
+            tests/performance/load-test-report.html
+            tests/performance/analysis/
+            tests/performance/load-test-summary.md
+
+  # Stress testing
+  stress-test:
+    name: 🔥 Stress Testing
+    runs-on: ubuntu-latest
+    needs: pre-test-health-check
+    if: needs.pre-test-health-check.outputs.environment_healthy == 'true' && github.event.inputs.test_type == 'stress-test'
+
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: 📦 Install Dependencies
+        run: |
+          pip install locust requests pandas matplotlib
+
+      - name: 🔥 Execute Stress Test
+        run: |
+          ENVIRONMENT="${{ github.event.inputs.environment || 'staging' }}"
+          DURATION="${{ github.event.inputs.duration || 600 }}"
+          MAX_USERS="${{ github.event.inputs.users || 500 }}"
+
+          if [[ "$ENVIRONMENT" == "production" ]]; then
+            ENDPOINT="${{ vars.PRODUCTION_ENDPOINT || 'https://api.vorta.example.com' }}"
+            API_KEY="${{ secrets.PRODUCTION_API_KEY || 'demo-api-key' }}"
+          else
+            ENDPOINT="${{ vars.STAGING_ENDPOINT || 'https://staging-api.vorta.example.com' }}"
+            API_KEY="${{ secrets.STAGING_API_KEY || 'demo-staging-key' }}"
+          fi
+
+          echo "🔥 Starting stress test on $ENVIRONMENT..."
+          echo "  - Duration: ${DURATION}s"
+          echo "  - Max Users: $MAX_USERS"
+
+          cd tests/performance
+
+          # Gradual stress test - ramp up users
+          locust -f stress_test.py \
+            --host="$ENDPOINT" \
+            --users="$MAX_USERS" \
+            --spawn-rate=20 \
+            --run-time="${DURATION}s" \
+            --headless \
+            --csv=stress-test-results \
+            --html=stress-test-report.html
+        env:
+          API_KEY: ${{ github.event.inputs.environment == 'production' && secrets.PRODUCTION_API_KEY || secrets.STAGING_API_KEY }}
+
+      - name: 📊 Analyze Stress Test Results
+        run: |
+          cd tests/performance
+
+          echo "📊 Analyzing stress test results..."
+
+          python analyze_results.py \
+            --stats-file=stress-test-results_stats.csv \
+            --history-file=stress-test-results_stats_history.csv \
+            --test-type=stress \
+            --output-dir=stress-analysis/
+
+          # Check for system breaking points
+          python find_breaking_point.py \
+            --results-dir=stress-analysis/ \
+            --output=stress-breaking-point.json
+
+      - name: 📄 Upload Stress Test Results
+        uses: actions/upload-artifact@v3
+        with:
+          name: stress-test-results
+          path: |
+            tests/performance/stress-test-results*
+            tests/performance/stress-test-report.html
+            tests/performance/stress-analysis/
+            tests/performance/stress-breaking-point.json
+
+  # Spike testing
+  spike-test:
+    name: 📊 Spike Testing
+    runs-on: ubuntu-latest
+    needs: pre-test-health-check
+    if: needs.pre-test-health-check.outputs.environment_healthy == 'true' && github.event.inputs.test_type == 'spike-test'
+
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: 📦 Install Dependencies
+        run: |
+          pip install locust requests pandas matplotlib
+
+      - name: 📊 Execute Spike Test
+        run: |
+          ENVIRONMENT="${{ github.event.inputs.environment || 'staging' }}"
+          SPIKE_USERS="${{ github.event.inputs.users || 200 }}"
+
+          if [[ "$ENVIRONMENT" == "production" ]]; then
+            ENDPOINT="${{ vars.PRODUCTION_ENDPOINT || 'https://api.vorta.example.com' }}"
+            API_KEY="${{ secrets.PRODUCTION_API_KEY || 'demo-api-key' }}"
+          else
+            ENDPOINT="${{ vars.STAGING_ENDPOINT || 'https://staging-api.vorta.example.com' }}"
+            API_KEY="${{ secrets.STAGING_API_KEY || 'demo-staging-key' }}"
+          fi
+
+          echo "📊 Starting spike test on $ENVIRONMENT..."
+          echo "  - Spike Users: $SPIKE_USERS"
+
+          cd tests/performance
+
+          # Spike test - sudden load increase
+          python spike_test.py \
+            --endpoint="$ENDPOINT" \
+            --api-key="$API_KEY" \
+            --spike-users="$SPIKE_USERS" \
+            --output-dir=spike-results/
+
+      - name: 📊 Analyze Spike Test Results
+        run: |
+          cd tests/performance
+
+          echo "📊 Analyzing spike test results..."
+
+          python analyze_spike_results.py \
+            --results-dir=spike-results/ \
+            --output=spike-analysis.json
+
+          # Check recovery time
+          python check_recovery_time.py \
+            --analysis-file=spike-analysis.json \
+            --output=spike-recovery-report.md
+
+      - name: 📄 Upload Spike Test Results
+        uses: actions/upload-artifact@v3
+        with:
+          name: spike-test-results
+          path: |
+            tests/performance/spike-results/
+            tests/performance/spike-analysis.json
+            tests/performance/spike-recovery-report.md
+
+  # Endurance testing
+  endurance-test:
+    name: 🏃 Endurance Testing
+    runs-on: ubuntu-latest
+    needs: pre-test-health-check
+    if: needs.pre-test-health-check.outputs.environment_healthy == 'true' && github.event.inputs.test_type == 'endurance-test'
+
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: 📦 Install Dependencies
+        run: |
+          pip install locust requests pandas matplotlib
+
+      - name: 🏃 Execute Endurance Test
+        run: |
+          ENVIRONMENT="${{ github.event.inputs.environment || 'staging' }}"
+          DURATION="${{ github.event.inputs.duration || 3600 }}"  # Default 1 hour
+          USERS="${{ github.event.inputs.users || 50 }}"
+
+          if [[ "$ENVIRONMENT" == "production" ]]; then
+            ENDPOINT="${{ vars.PRODUCTION_ENDPOINT || 'https://api.vorta.example.com' }}"
+            API_KEY="${{ secrets.PRODUCTION_API_KEY || 'demo-api-key' }}"
+          else
+            ENDPOINT="${{ vars.STAGING_ENDPOINT || 'https://staging-api.vorta.example.com' }}"
+            API_KEY="${{ secrets.STAGING_API_KEY || 'demo-staging-key' }}"
+          fi
+
+          echo "🏃 Starting endurance test on $ENVIRONMENT..."
+          echo "  - Duration: ${DURATION}s ($(($DURATION / 60)) minutes)"
+          echo "  - Sustained Users: $USERS"
+
+          cd tests/performance
+
+          # Long-running endurance test
+          locust -f endurance_test.py \
+            --host="$ENDPOINT" \
+            --users="$USERS" \
+            --spawn-rate=5 \
+            --run-time="${DURATION}s" \
+            --headless \
+            --csv=endurance-test-results \
+            --html=endurance-test-report.html
+        env:
+          API_KEY: ${{ github.event.inputs.environment == 'production' && secrets.PRODUCTION_API_KEY || secrets.STAGING_API_KEY }}
+
+      - name: 📊 Analyze Endurance Test Results
+        run: |
+          cd tests/performance
+
+          echo "📊 Analyzing endurance test results..."
+
+          python analyze_endurance_results.py \
+            --stats-file=endurance-test-results_stats.csv \
+            --history-file=endurance-test-results_stats_history.csv \
+            --output-dir=endurance-analysis/
+
+          # Check for memory leaks and performance degradation
+          python check_degradation.py \
+            --analysis-dir=endurance-analysis/ \
+            --output=endurance-health-report.md
+
+      - name: 📄 Upload Endurance Test Results
+        uses: actions/upload-artifact@v3
+        with:
+          name: endurance-test-results
+          path: |
+            tests/performance/endurance-test-results*
+            tests/performance/endurance-test-report.html
+            tests/performance/endurance-analysis/
+            tests/performance/endurance-health-report.md
+
+  # Performance comparison
+  performance-comparison:
+    name: 📊 Performance Comparison
+    runs-on: ubuntu-latest
+    needs: [pre-test-health-check, load-test]
+    if: always() && (needs.load-test.result == 'success' || needs.stress-test.result == 'success')
+
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: 📄 Download Test Results
+        uses: actions/download-artifact@v3
+        with:
+          path: test-results/
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: 📦 Install Analysis Tools
+        run: |
+          pip install pandas matplotlib seaborn jinja2
+
+      - name: 📊 Generate Performance Comparison
+        run: |
+          echo "📊 Generating performance comparison report..."
+
+          python scripts/performance/compare_results.py \
+            --test-results-dir=test-results/ \
+            --baseline="${{ needs.pre-test-health-check.outputs.baseline_metrics }}" \
+            --output-dir=comparison-results/
+
+          # Create executive summary
+          python scripts/performance/create_executive_summary.py \
+            --comparison-dir=comparison-results/ \
+            --test-type="${{ github.event.inputs.test_type || 'load-test' }}" \
+            --environment="${{ github.event.inputs.environment || 'staging' }}" \
+            --output=PERFORMANCE_SUMMARY.md
+
+      - name: 📄 Upload Performance Comparison
+        uses: actions/upload-artifact@v3
+        with:
+          name: performance-comparison
+          path: |
+            comparison-results/
+            PERFORMANCE_SUMMARY.md
+
+  # Performance regression check
+  regression-check:
+    name: 🔍 Performance Regression Check
+    runs-on: ubuntu-latest
+    needs: [load-test, performance-comparison]
+    if: github.event_name == 'pull_request' && needs.load-test.result == 'success'
+
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: 📄 Download Current Results
+        uses: actions/download-artifact@v3
+        with:
+          name: performance-comparison
+          path: current-results/
+
+      - name: 📊 Get Previous Results
+        run: |
+          echo "📊 Fetching previous performance results..."
+
+          # Get latest successful performance test results from main branch
+          gh api repos/${{ github.repository }}/actions/workflows/performance-test.yml/runs \
+            --jq '.workflow_runs[] | select(.head_branch == "main" and .conclusion == "success") | .id' \
+            --limit 1 > latest_run_id.txt
+
+          if [[ -s latest_run_id.txt ]]; then
+            LATEST_RUN_ID=$(cat latest_run_id.txt)
+            echo "📊 Found previous run: $LATEST_RUN_ID"
+            
+            # Download artifacts from previous run
+            gh api repos/${{ github.repository }}/actions/runs/$LATEST_RUN_ID/artifacts \
+              --jq '.artifacts[] | select(.name == "performance-comparison") | .archive_download_url' \
+              > previous_artifact_url.txt
+            
+            if [[ -s previous_artifact_url.txt ]]; then
+              ARTIFACT_URL=$(cat previous_artifact_url.txt)
+              curl -L -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+                "$ARTIFACT_URL" -o previous-results.zip
+              unzip previous-results.zip -d previous-results/
+            fi
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🔍 Analyze Regression
+        run: |
+          echo "🔍 Analyzing performance regression..."
+
+          python scripts/performance/regression_analysis.py \
+            --current-results=current-results/ \
+            --previous-results=previous-results/ \
+            --threshold=10 \
+            --output=regression-report.md
+
+      - name: 📊 Check Regression Thresholds
+        id: regression
+        run: |
+          if [[ -f regression-report.md ]]; then
+            # Check if there are significant regressions
+            REGRESSIONS=$(grep -c "REGRESSION DETECTED" regression-report.md || echo "0")
+            echo "regression_count=$REGRESSIONS" >> $GITHUB_OUTPUT
+            
+            if [[ $REGRESSIONS -gt 0 ]]; then
+              echo "⚠️ Performance regression detected!"
+              echo "📊 Found $REGRESSIONS performance regressions"
+              exit 1
+            else
+              echo "✅ No significant performance regressions detected"
+            fi
+          fi
+
+      - name: 💬 Comment on PR
+        if: always()
+        uses: peter-evans/create-or-update-comment@v3
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          body-path: regression-report.md
+
+      - name: 📄 Upload Regression Analysis
+        uses: actions/upload-artifact@v3
+        with:
+          name: regression-analysis
+          path: regression-report.md
+
+  # Post-test health check
+  post-test-health-check:
+    name: 🔍 Post-test Health Check
+    runs-on: ubuntu-latest
+    needs: [load-test, stress-test, spike-test, endurance-test]
+    if: always()
+
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: 📦 Install Dependencies
+        run: |
+          pip install requests
+
+      - name: 🔍 Environment Health Check
+        run: |
+          ENVIRONMENT="${{ github.event.inputs.environment || 'staging' }}"
+
+          if [[ "$ENVIRONMENT" == "production" ]]; then
+            ENDPOINT="${{ vars.PRODUCTION_ENDPOINT || 'https://api.vorta.example.com' }}"
+            API_KEY="${{ secrets.PRODUCTION_API_KEY || 'demo-api-key' }}"
+          else
+            ENDPOINT="${{ vars.STAGING_ENDPOINT || 'https://staging-api.vorta.example.com' }}"
+            API_KEY="${{ secrets.STAGING_API_KEY || 'demo-staging-key' }}"
+          fi
+
+          echo "🔍 Post-test health check on $ENVIRONMENT..."
+
+          # Wait a bit for system to stabilize
+          sleep 60
+
+          # Health check
+          HEALTH_RESPONSE=$(curl -s -f -X GET "$ENDPOINT/health" -H "Authorization: Bearer $API_KEY" || echo "failed")
+
+          if [[ "$HEALTH_RESPONSE" == "failed" ]]; then
+            echo "❌ Post-test health check failed!"
+            echo "🚨 System may be unstable after performance testing"
+            exit 1
+          else
+            echo "✅ System is healthy after performance testing"
+          fi
+
+      - name: 📊 Monitor System Recovery
+        run: |
+          echo "📊 Monitoring system recovery..."
+
+          # Monitor for 5 minutes to ensure stability
+          for i in {1..10}; do
+            echo "📊 Check $i/10..."
+            python scripts/performance/quick_health_check.py \
+              --endpoint="${{ vars.STAGING_ENDPOINT || vars.PRODUCTION_ENDPOINT }}" \
+              --api-key="${{ secrets.STAGING_API_KEY || secrets.PRODUCTION_API_KEY }}"
+            
+            sleep 30
+          done
+
+          echo "✅ System recovery monitoring completed"
+
+  # Notification
+  notify-performance-results:
+    name: 📢 Notify Performance Results
+    runs-on: ubuntu-latest
+    needs:
+      [
+        load-test,
+        stress-test,
+        spike-test,
+        endurance-test,
+        performance-comparison,
+        regression-check,
+        post-test-health-check,
+      ]
+    if: always()
+
+    steps:
+      - name: 📢 Success Notification
+        if: success()
+        run: |
+          echo "✅ Performance testing completed successfully!"
+          echo "📊 Test Type: ${{ github.event.inputs.test_type || 'load-test' }}"
+          echo "🎯 Environment: ${{ github.event.inputs.environment || 'staging' }}"
+          echo "👥 Users: ${{ github.event.inputs.users || '100' }}"
+          echo "⏱️ Duration: ${{ github.event.inputs.duration || '300' }}s"
+          echo "📈 Performance metrics captured and analyzed"
+
+      - name: 📢 Failure Notification
+        if: failure()
+        run: |
+          echo "❌ Performance testing encountered issues!"
+          echo "🔍 Check test results and system health"
+          echo "📊 Performance regression may have occurred"
+          exit 1

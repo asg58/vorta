@@ -1,0 +1,302 @@
+{
+  "name": "VORTA AI Voice Agent Development",
+  "dockerComposeFile": "../docker-compose.yml",
+  "service": "development",
+  "workspaceFolder": "/workspace",
+
+  // Alternative: Use a pre-built image
+  // "image": "mcr.microsoft.com/devcontainers/python:3.12-bullseye",
+
+  "features": {
+    "ghcr.io/devcontainers/features/python:1": {
+      "version": "3.12",
+      "installTools": true
+    },
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "18",
+      "nodeGypDependencies": true
+    },
+    "ghcr.io/devcontainers/features/java:1": {
+      "version": "11",
+      "installMaven": true,
+      "installGradle": true
+    },
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {
+      "version": "latest",
+      "enableNonRootDocker": true
+    },
+    "ghcr.io/devcontainers/features/kubectl-helm-minikube:1": {
+      "version": "latest",
+      "helm": "latest",
+      "minikube": "latest"
+    },
+    "ghcr.io/devcontainers/features/terraform:1": {
+      "version": "latest"
+    },
+    "ghcr.io/devcontainers/features/aws-cli:1": {
+      "version": "latest"
+    },
+    "ghcr.io/devcontainers/features/azure-cli:1": {
+      "version": "latest"
+    },
+    "ghcr.io/devcontainers/features/github-cli:1": {
+      "version": "latest"
+    }
+  },
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        // Python Development
+        "ms-python.python",
+        "ms-python.pylint",
+        "ms-python.black-formatter",
+        "ms-python.isort",
+        "ms-python.mypy-type-checker",
+        "ms-python.debugpy",
+
+        // JavaScript/TypeScript Development
+        "ms-vscode.vscode-typescript-next",
+        "esbenp.prettier-vscode",
+        "dbaeumer.vscode-eslint",
+
+        // Java Development
+        "redhat.java",
+        "vscjava.vscode-java-debug",
+        "vscjava.vscode-java-test",
+        "vscjava.vscode-maven",
+
+        // Docker & Containers
+        "ms-azuretools.vscode-docker",
+        "ms-vscode-remote.remote-containers",
+
+        // Kubernetes
+        "ms-kubernetes-tools.vscode-kubernetes-tools",
+
+        // Infrastructure as Code
+        "hashicorp.terraform",
+        "ms-azuretools.vscode-azureterraform",
+
+        // Database
+        "ms-mssql.mssql",
+        "cweijan.vscode-postgresql-client2",
+        "cweijan.vscode-redis-client",
+
+        // AI/ML Development
+        "ms-toolsai.jupyter",
+        "ms-toolsai.vscode-jupyter-cell-tags",
+        "ms-toolsai.vscode-jupyter-slideshow",
+
+        // Git & GitHub
+        "github.vscode-pull-request-github",
+        "github.copilot",
+        "github.copilot-chat",
+
+        // Code Quality & Security
+        "sonarsource.sonarlint-vscode",
+        "snyk-security.snyk-vulnerability-scanner",
+        "ms-vscode.hexeditor",
+
+        // API Development
+        "humao.rest-client",
+        "42crunch.vscode-openapi",
+
+        // DevOps & Monitoring
+        "ms-vscode.azurecli",
+        "amazonwebservices.aws-toolkit-vscode",
+        "grafana.vscode-jsonnet",
+
+        // Documentation
+        "yzhang.markdown-all-in-one",
+        "davidanson.vscode-markdownlint",
+        "bierner.markdown-mermaid",
+
+        // General Development
+        "ms-vscode.vscode-json",
+        "redhat.vscode-yaml",
+        "ms-vscode.makefile-tools",
+        "streetsidesoftware.code-spell-checker",
+        "gruntfuggly.todo-tree",
+        "aaron-bond.better-comments",
+        "wayou.vscode-todo-highlight"
+      ],
+
+      "settings": {
+        // Python Settings
+        "python.defaultInterpreterPath": "/usr/local/bin/python",
+        "python.linting.enabled": true,
+        "python.linting.pylintEnabled": true,
+        "python.linting.flake8Enabled": true,
+        "python.linting.mypyEnabled": true,
+        "python.formatting.provider": "black",
+        "python.sortImports.provider": "isort",
+        "python.testing.pytestEnabled": true,
+        "python.testing.unittestEnabled": false,
+
+        // Editor Settings
+        "editor.formatOnSave": true,
+        "editor.codeActionsOnSave": {
+          "source.organizeImports": "explicit",
+          "source.fixAll": "explicit"
+        },
+        "editor.rulers": [88, 120],
+        "editor.tabSize": 4,
+        "editor.insertSpaces": true,
+
+        // File Settings
+        "files.trimTrailingWhitespace": true,
+        "files.insertFinalNewline": true,
+        "files.exclude": {
+          "**/__pycache__": true,
+          "**/*.pyc": true,
+          "**/node_modules": true,
+          "**/.pytest_cache": true,
+          "**/.mypy_cache": true,
+          "**/dist": true,
+          "**/build": true,
+          "**/*.egg-info": true
+        },
+
+        // Terminal Settings
+        "terminal.integrated.shell.linux": "/bin/bash",
+        "terminal.integrated.defaultProfile.linux": "bash",
+
+        // Git Settings
+        "git.autofetch": true,
+        "git.enableSmartCommit": true,
+
+        // Docker Settings
+        "docker.dockerPath": "/usr/local/bin/docker",
+
+        // Language Specific Settings
+        "[python]": {
+          "editor.defaultFormatter": "ms-python.black-formatter",
+          "editor.formatOnSave": true,
+          "editor.codeActionsOnSave": {
+            "source.organizeImports": "explicit"
+          }
+        },
+        "[javascript]": {
+          "editor.defaultFormatter": "esbenp.prettier-vscode"
+        },
+        "[typescript]": {
+          "editor.defaultFormatter": "esbenp.prettier-vscode"
+        },
+        "[json]": {
+          "editor.defaultFormatter": "vscode.json-language-features"
+        },
+        "[yaml]": {
+          "editor.defaultFormatter": "redhat.vscode-yaml",
+          "editor.tabSize": 2
+        },
+        "[dockerfile]": {
+          "editor.tabSize": 4
+        }
+      }
+    }
+  },
+
+  // Container Configuration
+  "mounts": [
+    "source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind",
+    "source=${localWorkspaceFolder}/.git,target=/workspace/.git,type=bind,consistency=cached"
+  ],
+
+  "forwardPorts": [
+    8000, // API Gateway
+    8001, // Inference Engine
+    8002, // Vector Store
+    8003, // Orchestrator
+    5432, // PostgreSQL
+    6379, // Redis
+    9090, // Prometheus
+    3000, // Grafana
+    8080, // Development Server
+    3001 // Frontend Development
+  ],
+
+  "portsAttributes": {
+    "8000": {
+      "label": "API Gateway",
+      "onAutoForward": "notify"
+    },
+    "8001": {
+      "label": "Inference Engine",
+      "onAutoForward": "silent"
+    },
+    "8002": {
+      "label": "Vector Store",
+      "onAutoForward": "silent"
+    },
+    "8003": {
+      "label": "Orchestrator",
+      "onAutoForward": "silent"
+    },
+    "5432": {
+      "label": "PostgreSQL Database",
+      "onAutoForward": "silent"
+    },
+    "6379": {
+      "label": "Redis Cache",
+      "onAutoForward": "silent"
+    },
+    "9090": {
+      "label": "Prometheus Monitoring",
+      "onAutoForward": "ignore"
+    },
+    "3000": {
+      "label": "Grafana Dashboard",
+      "onAutoForward": "openPreview"
+    },
+    "8080": {
+      "label": "Development Server",
+      "onAutoForward": "openBrowser"
+    },
+    "3001": {
+      "label": "Frontend Dev Server",
+      "onAutoForward": "openBrowser"
+    }
+  },
+
+  // Post-creation commands
+  "postCreateCommand": "bash -c 'echo \"🚀 Setting up VORTA development environment...\" && pip install --upgrade pip && pip install -r requirements-dev.txt && pre-commit install && chmod +x scripts/development/setup-dev-env.sh && scripts/development/setup-dev-env.sh && echo \"✅ VORTA development environment ready!\"'",
+
+  // Container user configuration
+  "remoteUser": "vscode",
+  "updateRemoteUserUID": true,
+
+  // Environment variables
+  "containerEnv": {
+    "PYTHONPATH": "/workspace",
+    "ENVIRONMENT": "development",
+    "DEBUG": "true",
+    "LOG_LEVEL": "DEBUG",
+    "DATABASE_URL": "postgresql://vorta:${localEnv:DB_PASSWORD}@postgres:5432/vorta_dev",
+    "REDIS_URL": "redis://redis:6379/0",
+    "OPENAI_API_KEY": "${localEnv:OPENAI_API_KEY}",
+    "ANTHROPIC_API_KEY": "${localEnv:ANTHROPIC_API_KEY}",
+    "AZURE_OPENAI_API_KEY": "${localEnv:AZURE_OPENAI_API_KEY}",
+    "AWS_ACCESS_KEY_ID": "${localEnv:AWS_ACCESS_KEY_ID}",
+    "AWS_SECRET_ACCESS_KEY": "${localEnv:AWS_SECRET_ACCESS_KEY}",
+    "GITHUB_TOKEN": "${localEnv:GITHUB_TOKEN}"
+  },
+
+  // Init commands for container startup
+  "initializeCommand": "bash -c 'echo \"🏗️ Initializing VORTA development container...\" && docker-compose -f docker-compose.yml pull'",
+
+  // Lifecycle scripts
+  "onCreateCommand": "bash -c 'echo \"📦 Installing development dependencies...\" && sudo apt-get update && sudo apt-get install -y build-essential curl wget git vim nano htop && curl -fsSL https://get.docker.com | sh && sudo usermod -aG docker vscode'",
+
+  "updateContentCommand": "bash -c 'echo \"🔄 Updating development environment...\" && pip install --upgrade pip && pip install -r requirements-dev.txt --upgrade && pre-commit autoupdate'",
+
+  // Shutdown behavior
+  "shutdownAction": "stopCompose",
+
+  // Wait for services to be ready
+  "waitFor": "postCreateCommand",
+
+  // Development container metadata
+  "capAdd": ["SYS_PTRACE"],
+
+  "securityOpt": ["seccomp=unconfined"]
+}

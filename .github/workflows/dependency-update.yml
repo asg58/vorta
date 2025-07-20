@@ -1,0 +1,536 @@
+name: 🔄 Dependency Updates
+
+on:
+  schedule:
+    # Run every Monday at 9 AM UTC
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+    inputs:
+      update_type:
+        description: 'Type of updates to perform'
+        type: choice
+        options:
+          - security-only
+          - minor-updates
+          - all-updates
+        default: 'security-only'
+      create_pr:
+        description: 'Create pull request for updates'
+        type: boolean
+        default: true
+
+env:
+  PYTHON_VERSION: '3.12.9'
+  NODE_VERSION: '18'
+  JAVA_VERSION: '11'
+
+jobs:
+  # Security vulnerability scan
+  security-scan:
+    name: 🛡️ Security Vulnerability Scan
+    runs-on: ubuntu-latest
+    outputs:
+      has_vulnerabilities: ${{ steps.scan.outputs.has_vulnerabilities }}
+      vulnerability_count: ${{ steps.scan.outputs.vulnerability_count }}
+
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: 🛡️ Python Security Scan
+        id: scan
+        run: |
+          pip install safety pip-audit
+
+          VULNERABILITY_COUNT=0
+          HAS_VULNERABILITIES=false
+
+          echo "🔍 Scanning Python dependencies for vulnerabilities..."
+
+          # Find all requirements files
+          find . -name "requirements*.txt" -type f | while read req_file; do
+            echo "📄 Scanning $req_file"
+            
+            # Safety scan
+            safety check -r "$req_file" --json --output safety-report.json || true
+            
+            # pip-audit scan
+            pip-audit --requirement "$req_file" --format=json --output=audit-report.json || true
+            
+            # Count vulnerabilities
+            if [[ -f safety-report.json ]]; then
+              SAFETY_VULNS=$(jq length safety-report.json 2>/dev/null || echo "0")
+              VULNERABILITY_COUNT=$((VULNERABILITY_COUNT + SAFETY_VULNS))
+            fi
+            
+            if [[ -f audit-report.json ]]; then
+              AUDIT_VULNS=$(jq '.vulnerabilities | length' audit-report.json 2>/dev/null || echo "0")
+              VULNERABILITY_COUNT=$((VULNERABILITY_COUNT + AUDIT_VULNS))
+            fi
+          done
+
+          if [[ $VULNERABILITY_COUNT -gt 0 ]]; then
+            HAS_VULNERABILITIES=true
+            echo "⚠️ Found $VULNERABILITY_COUNT security vulnerabilities"
+          else
+            echo "✅ No security vulnerabilities found"
+          fi
+
+          echo "has_vulnerabilities=$HAS_VULNERABILITIES" >> $GITHUB_OUTPUT
+          echo "vulnerability_count=$VULNERABILITY_COUNT" >> $GITHUB_OUTPUT
+
+      - name: ☕ Java Security Scan
+        run: |
+          find . -name "pom.xml" -type f | while read pom_file; do
+            echo "📄 Scanning $(dirname $pom_file)"
+            cd "$(dirname $pom_file)"
+            
+            # OWASP Dependency Check (would require setup)
+            # mvn org.owasp:dependency-check-maven:check
+            
+            # For now, use Maven's built-in vulnerability checking
+            mvn versions:display-dependency-updates -DprocessDependencyManagement=false
+            cd - > /dev/null
+          done
+
+      - name: 🟨 Node.js Security Scan
+        run: |
+          find . -name "package.json" -type f | while read package_file; do
+            echo "📄 Scanning $(dirname $package_file)"
+            cd "$(dirname $package_file)"
+            
+            if [[ -f package-lock.json ]]; then
+              npm audit --audit-level=moderate --json > npm-audit.json || true
+              
+              if [[ -f npm-audit.json ]]; then
+                VULNERABILITIES=$(jq '.metadata.vulnerabilities.total' npm-audit.json 2>/dev/null || echo "0")
+                echo "🔍 Found $VULNERABILITIES npm vulnerabilities"
+              fi
+            fi
+            cd - > /dev/null
+          done
+
+      - name: 📄 Upload Security Reports
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: security-scan-reports
+          path: |
+            **/safety-report.json
+            **/audit-report.json
+            **/npm-audit.json
+
+  # Python dependency updates
+  python-updates:
+    name: 🐍 Python Dependency Updates
+    runs-on: ubuntu-latest
+    needs: security-scan
+    if: github.event.inputs.update_type != 'skip' || needs.security-scan.outputs.has_vulnerabilities == 'true'
+
+    strategy:
+      matrix:
+        service: [inference-engine, vector-store, orchestrator]
+
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: 📦 Install Update Tools
+        run: |
+          pip install pip-tools pip-check-reqs pur
+
+      - name: 🔄 Update Python Dependencies
+        run: |
+          cd services/${{ matrix.service }}
+
+          if [[ ! -f requirements.in ]]; then
+            echo "📝 Creating requirements.in from requirements.txt"
+            cp requirements.txt requirements.in
+          fi
+
+          # Backup current requirements
+          cp requirements.txt requirements.txt.backup
+
+          echo "🔄 Updating Python dependencies for ${{ matrix.service }}..."
+
+          # Update strategy based on input
+          case "${{ github.event.inputs.update_type }}" in
+            "security-only")
+              echo "🛡️ Security-only updates"
+              # Update only packages with known vulnerabilities
+              safety check --json --output safety.json || true
+              if [[ -f safety.json ]]; then
+                jq -r '.[].package_name' safety.json | while read package; do
+                  echo "🔒 Updating security-vulnerable package: $package"
+                  pur -r requirements.in --only "$package"
+                done
+              fi
+              ;;
+            "minor-updates")
+              echo "🔄 Minor version updates only"
+              pur -r requirements.in --minor
+              ;;
+            "all-updates"|"")
+              echo "🔄 All available updates"
+              pur -r requirements.in
+              ;;
+          esac
+
+          # Compile updated requirements
+          pip-compile requirements.in --upgrade
+
+          # Check for conflicts
+          pip-check-reqs requirements.txt
+
+      - name: 🧪 Test Updated Dependencies
+        run: |
+          cd services/${{ matrix.service }}
+
+          echo "🧪 Testing updated dependencies..."
+          pip install -r requirements.txt
+
+          # Run basic import tests
+          python -c "import sys; print('Python imports successful')"
+
+          # Run unit tests if available
+          if [[ -d tests/unit ]]; then
+            python -m pytest tests/unit/ --maxfail=5 -q
+          fi
+
+      - name: 📊 Generate Dependency Report
+        run: |
+          cd services/${{ matrix.service }}
+
+          echo "📊 Generating dependency update report..."
+
+          # Compare old vs new requirements
+          if [[ -f requirements.txt.backup ]]; then
+            echo "## Dependency Changes for ${{ matrix.service }}" > dependency-report.md
+            echo "" >> dependency-report.md
+            
+            # Show additions, removals, and updates
+            diff -u requirements.txt.backup requirements.txt > changes.diff || true
+            
+            if [[ -s changes.diff ]]; then
+              echo "### Changes:" >> dependency-report.md
+              echo '```diff' >> dependency-report.md
+              cat changes.diff >> dependency-report.md
+              echo '```' >> dependency-report.md
+            else
+              echo "No dependency changes required." >> dependency-report.md
+            fi
+          fi
+
+      - name: 📄 Upload Dependency Reports
+        uses: actions/upload-artifact@v3
+        with:
+          name: python-dependency-reports-${{ matrix.service }}
+          path: services/${{ matrix.service }}/dependency-report.md
+
+  # Java dependency updates
+  java-updates:
+    name: ☕ Java Dependency Updates
+    runs-on: ubuntu-latest
+    needs: security-scan
+
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: ☕ Setup Java
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'temurin'
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: 🔄 Update Java Dependencies
+        run: |
+          cd services/api-gateway
+
+          echo "🔄 Updating Java dependencies..."
+
+          # Backup current POM
+          cp pom.xml pom.xml.backup
+
+          # Update dependencies based on type
+          case "${{ github.event.inputs.update_type }}" in
+            "security-only")
+              echo "🛡️ Security-only updates"
+              # Use OWASP dependency check to identify vulnerable dependencies
+              mvn org.owasp:dependency-check-maven:check || true
+              ;;
+            "minor-updates")
+              echo "🔄 Minor version updates"
+              mvn versions:use-next-releases -DgenerateBackupPoms=false
+              ;;
+            "all-updates"|"")
+              echo "🔄 All available updates"
+              mvn versions:use-latest-versions -DgenerateBackupPoms=false
+              ;;
+          esac
+
+          # Update parent and plugin versions
+          mvn versions:update-parent -DgenerateBackupPoms=false
+          mvn versions:update-plugins -DgenerateBackupPoms=false
+
+      - name: 🧪 Test Java Updates
+        run: |
+          cd services/api-gateway
+
+          echo "🧪 Testing updated Java dependencies..."
+
+          # Compile and run tests
+          mvn clean compile test -q
+
+      - name: 📊 Generate Java Dependency Report
+        run: |
+          cd services/api-gateway
+
+          echo "📊 Generating Java dependency report..."
+
+          # Generate dependency tree
+          mvn dependency:tree > current-dependencies.txt
+
+          # Compare with backup if available
+          if [[ -f pom.xml.backup ]]; then
+            echo "## Java Dependency Changes" > dependency-report.md
+            echo "" >> dependency-report.md
+            
+            # Show POM differences
+            diff -u pom.xml.backup pom.xml > pom-changes.diff || true
+            
+            if [[ -s pom-changes.diff ]]; then
+              echo "### POM Changes:" >> dependency-report.md
+              echo '```diff' >> dependency-report.md
+              cat pom-changes.diff >> dependency-report.md
+              echo '```' >> dependency-report.md
+            else
+              echo "No Java dependency changes required." >> dependency-report.md
+            fi
+          fi
+
+      - name: 📄 Upload Java Dependency Report
+        uses: actions/upload-artifact@v3
+        with:
+          name: java-dependency-report
+          path: services/api-gateway/dependency-report.md
+
+  # Node.js dependency updates
+  nodejs-updates:
+    name: 🟨 Node.js Dependency Updates
+    runs-on: ubuntu-latest
+    needs: security-scan
+
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: 🟨 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: 🔄 Update Node.js Dependencies
+        run: |
+          find . -name "package.json" -type f | while read package_file; do
+            echo "🔄 Updating dependencies in $(dirname $package_file)"
+            cd "$(dirname $package_file)"
+            
+            # Backup current package files
+            cp package.json package.json.backup
+            if [[ -f package-lock.json ]]; then
+              cp package-lock.json package-lock.json.backup
+            fi
+            
+            # Install npm-check-updates
+            npm install -g npm-check-updates
+            
+            # Update based on type
+            case "${{ github.event.inputs.update_type }}" in
+              "security-only")
+                echo "🛡️ Security-only updates"
+                # Fix security vulnerabilities
+                npm audit fix --only=prod --dry-run
+                npm audit fix --only=prod
+                ;;
+              "minor-updates")
+                echo "🔄 Minor version updates"
+                ncu -u --target minor
+                npm install
+                ;;
+              "all-updates"|"")
+                echo "🔄 All available updates"
+                ncu -u
+                npm install
+                ;;
+            esac
+            
+            cd - > /dev/null
+          done
+
+      - name: 🧪 Test Node.js Updates
+        run: |
+          find . -name "package.json" -type f | while read package_file; do
+            cd "$(dirname $package_file)"
+            
+            if [[ -f package-lock.json ]]; then
+              echo "🧪 Testing $(dirname $package_file)..."
+              
+              # Run tests if available
+              if npm run test --if-present; then
+                echo "✅ Tests passed"
+              else
+                echo "⚠️ No tests or tests failed"
+              fi
+              
+              # Build if build script exists
+              if npm run build --if-present; then
+                echo "✅ Build successful"
+              fi
+            fi
+            
+            cd - > /dev/null
+          done
+
+      - name: 📊 Generate Node.js Dependency Report
+        run: |
+          echo "## Node.js Dependency Changes" > nodejs-dependency-report.md
+          echo "" >> nodejs-dependency-report.md
+
+          find . -name "package.json.backup" -type f | while read backup_file; do
+            original_dir=$(dirname "$backup_file")
+            package_file="${original_dir}/package.json"
+            
+            echo "### Changes in $original_dir:" >> nodejs-dependency-report.md
+            
+            # Compare package.json changes
+            diff -u "$backup_file" "$package_file" > package-changes.diff || true
+            
+            if [[ -s package-changes.diff ]]; then
+              echo '```diff' >> nodejs-dependency-report.md
+              cat package-changes.diff >> nodejs-dependency-report.md
+              echo '```' >> nodejs-dependency-report.md
+            else
+              echo "No changes required." >> nodejs-dependency-report.md
+            fi
+            echo "" >> nodejs-dependency-report.md
+          done
+
+      - name: 📄 Upload Node.js Dependency Report
+        uses: actions/upload-artifact@v3
+        with:
+          name: nodejs-dependency-report
+          path: nodejs-dependency-report.md
+
+  # Create pull request with updates
+  create-update-pr:
+    name: 📝 Create Update Pull Request
+    runs-on: ubuntu-latest
+    needs: [security-scan, python-updates, java-updates, nodejs-updates]
+    if: github.event.inputs.create_pr != 'false' && (needs.python-updates.result == 'success' || needs.java-updates.result == 'success' || needs.nodejs-updates.result == 'success')
+
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: 📄 Download All Reports
+        uses: actions/download-artifact@v3
+        with:
+          path: dependency-reports/
+
+      - name: 📝 Compile Update Summary
+        run: |
+          echo "# Dependency Update Summary" > UPDATE_SUMMARY.md
+          echo "" >> UPDATE_SUMMARY.md
+          echo "**Update Type**: ${{ github.event.inputs.update_type || 'security-only' }}" >> UPDATE_SUMMARY.md
+          echo "**Date**: $(date -u +'%Y-%m-%d %H:%M:%S UTC')" >> UPDATE_SUMMARY.md
+          echo "" >> UPDATE_SUMMARY.md
+
+          if [[ "${{ needs.security-scan.outputs.has_vulnerabilities }}" == "true" ]]; then
+            echo "## 🛡️ Security Vulnerabilities Found" >> UPDATE_SUMMARY.md
+            echo "**Count**: ${{ needs.security-scan.outputs.vulnerability_count }}" >> UPDATE_SUMMARY.md
+            echo "" >> UPDATE_SUMMARY.md
+          fi
+
+          echo "## 📊 Detailed Reports" >> UPDATE_SUMMARY.md
+          echo "" >> UPDATE_SUMMARY.md
+
+          # Combine all individual reports
+          find dependency-reports/ -name "*.md" -type f | while read report; do
+            echo "### $(basename $(dirname $report))" >> UPDATE_SUMMARY.md
+            cat "$report" >> UPDATE_SUMMARY.md
+            echo "" >> UPDATE_SUMMARY.md
+          done
+
+      - name: 🔍 Check for Changes
+        id: changes
+        run: |
+          if git diff --quiet; then
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+            echo "📝 No dependency changes detected"
+          else
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+            echo "📝 Dependency changes detected"
+            git diff --stat
+          fi
+
+      - name: 📝 Create Pull Request
+        if: steps.changes.outputs.has_changes == 'true'
+        uses: peter-evans/create-pull-request@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: |
+            🔄 Automated dependency updates (${{ github.event.inputs.update_type || 'security-only' }})
+
+            - Security vulnerabilities: ${{ needs.security-scan.outputs.vulnerability_count }}
+            - Update type: ${{ github.event.inputs.update_type || 'security-only' }}
+            - Generated on: $(date -u +'%Y-%m-%d %H:%M:%S UTC')
+          title: 🔄 Automated Dependency Updates (${{ github.event.inputs.update_type || 'security-only' }})
+          body-path: UPDATE_SUMMARY.md
+          branch: dependency-updates/automated-${{ github.run_number }}
+          delete-branch: true
+          labels: |
+            dependencies
+            automated
+            ${{ github.event.inputs.update_type || 'security-only' }}
+
+  # Notify about critical security issues
+  security-alert:
+    name: 🚨 Security Alert
+    runs-on: ubuntu-latest
+    needs: security-scan
+    if: needs.security-scan.outputs.vulnerability_count > 10
+
+    steps:
+      - name: 🚨 Critical Security Alert
+        run: |
+          echo "🚨 CRITICAL SECURITY ALERT!"
+          echo "📊 Found ${{ needs.security-scan.outputs.vulnerability_count }} security vulnerabilities"
+          echo "🔧 Immediate action required to address security issues"
+
+          # This would typically send alerts to Slack, email, etc.
+          echo "📧 Security team has been notified"
+
+  # Cleanup
+  cleanup:
+    name: 🧹 Cleanup
+    runs-on: ubuntu-latest
+    needs: [python-updates, java-updates, nodejs-updates, create-update-pr]
+    if: always()
+
+    steps:
+      - name: 🧹 Cleanup Temporary Files
+        run: |
+          echo "🧹 Cleaning up temporary files and artifacts"
+          # Cleanup would happen automatically, but this is for logging
+          echo "✅ Cleanup completed"

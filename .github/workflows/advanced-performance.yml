@@ -1,0 +1,332 @@
+name: ⚡ Advanced Performance Testing
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'services/**'
+      - 'infrastructure/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'services/**'
+      - 'infrastructure/**'
+  schedule:
+    # Run comprehensive performance tests weekly
+    - cron: '0 2 * * 0'
+  workflow_dispatch:
+    inputs:
+      test_suite:
+        description: 'Performance test suite to run'
+        type: choice
+        options:
+          - comprehensive
+          - load-test
+          - stress-test
+          - spike-test
+          - endurance-test
+          - memory-leak-test
+          - concurrent-user-test
+        default: 'comprehensive'
+      target_environment:
+        description: 'Target environment'
+        type: choice
+        options:
+          - local
+          - staging
+          - production-mirror
+        default: 'staging'
+      duration_minutes:
+        description: 'Test duration in minutes'
+        type: number
+        default: 30
+      concurrent_users:
+        description: 'Number of concurrent users'
+        type: number
+        default: 500
+
+env:
+  PYTHON_VERSION: '3.12.9'
+  NODE_VERSION: '18'
+
+jobs:
+  # Environment Setup
+  setup-test-environment:
+    name: 🏗️ Setup Test Environment
+    runs-on: ubuntu-latest
+    outputs:
+      environment-url: ${{ steps.setup.outputs.url }}
+      environment-ready: ${{ steps.health.outputs.ready }}
+
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: 🐳 Setup Docker Environment
+        run: |
+          docker-compose -f docker-compose.yml -f docker-compose.override.yml up -d
+          sleep 30
+
+      - name: 🏗️ Environment Setup
+        id: setup
+        run: |
+          echo "url=http://localhost:8000" >> $GITHUB_OUTPUT
+
+      - name: 🔍 Health Check
+        id: health
+        run: |
+          max_attempts=30
+          attempt=1
+
+          while [ $attempt -le $max_attempts ]; do
+            if curl -f http://localhost:8000/health > /dev/null 2>&1; then
+              echo "ready=true" >> $GITHUB_OUTPUT
+              echo "✅ Environment is ready"
+              exit 0
+            fi
+            
+            echo "Attempt $attempt/$max_attempts failed, waiting..."
+            sleep 10
+            attempt=$((attempt + 1))
+          done
+
+          echo "ready=false" >> $GITHUB_OUTPUT
+          echo "❌ Environment failed to start"
+          exit 1
+
+  # Load Testing
+  load-testing:
+    name: 📈 Load Testing
+    runs-on: ubuntu-latest
+    needs: setup-test-environment
+    if: needs.setup-test-environment.outputs.environment-ready == 'true' && (github.event.inputs.test_suite == 'load-test' || github.event.inputs.test_suite == 'comprehensive' || github.event.inputs.test_suite == '')
+
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: 📦 Install Load Testing Tools
+        run: |
+          pip install locust pytest-benchmark requests aiohttp websockets
+
+      - name: 🚀 Run Load Tests
+        run: |
+          echo "🔥 Starting load tests..."
+
+          # API Load Test
+          locust --headless --users ${{ github.event.inputs.concurrent_users || 500 }} \
+                 --spawn-rate 10 \
+                 --run-time ${{ github.event.inputs.duration_minutes || 30 }}m \
+                 --host http://localhost:8000 \
+                 --html load-test-report.html \
+                 --csv load-test-results \
+                 -f tests/performance/locustfiles/api_load_test.py
+
+      - name: 📊 Upload Load Test Results
+        uses: actions/upload-artifact@v3
+        with:
+          name: load-test-results
+          path: |
+            load-test-report.html
+            load-test-results_*.csv
+
+  # Stress Testing
+  stress-testing:
+    name: 💪 Stress Testing
+    runs-on: ubuntu-latest
+    needs: setup-test-environment
+    if: needs.setup-test-environment.outputs.environment-ready == 'true' && (github.event.inputs.test_suite == 'stress-test' || github.event.inputs.test_suite == 'comprehensive')
+
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: 📦 Install Stress Testing Tools
+        run: |
+          pip install locust psutil matplotlib seaborn
+
+      - name: 💪 Run Stress Tests
+        run: |
+          echo "💥 Starting stress tests..."
+
+          # Gradually increase load until system breaks
+          python tests/performance/stress_test.py \
+            --target-url http://localhost:8000 \
+            --max-users 2000 \
+            --duration 600 \
+            --output stress-test-results.json
+
+      - name: 📊 Generate Stress Test Report
+        run: |
+          python tests/performance/generate_report.py \
+            --input stress-test-results.json \
+            --output stress-test-report.html \
+            --type stress
+
+      - name: 📊 Upload Stress Test Results
+        uses: actions/upload-artifact@v3
+        with:
+          name: stress-test-results
+          path: |
+            stress-test-report.html
+            stress-test-results.json
+
+  # Memory and Resource Testing
+  resource-testing:
+    name: 🧠 Memory & Resource Testing
+    runs-on: ubuntu-latest
+    needs: setup-test-environment
+    if: needs.setup-test-environment.outputs.environment-ready == 'true' && (github.event.inputs.test_suite == 'memory-leak-test' || github.event.inputs.test_suite == 'comprehensive')
+
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: 📦 Install Monitoring Tools
+        run: |
+          pip install psutil memory-profiler py-spy docker
+
+      - name: 🧠 Run Memory Tests
+        run: |
+          echo "🧠 Starting memory and resource tests..."
+
+          # Monitor memory usage over time
+          python tests/performance/memory_test.py \
+            --duration ${{ github.event.inputs.duration_minutes || 30 }} \
+            --interval 30 \
+            --output memory-usage.json
+
+          # Profile memory usage of services
+          py-spy record -o memory-profile.svg -d 300 -- python -c "import time; time.sleep(300)"
+
+      - name: 📊 Generate Resource Report
+        run: |
+          python tests/performance/resource_report.py \
+            --memory-data memory-usage.json \
+            --output resource-report.html
+
+      - name: 📊 Upload Resource Test Results
+        uses: actions/upload-artifact@v3
+        with:
+          name: resource-test-results
+          path: |
+            resource-report.html
+            memory-usage.json
+            memory-profile.svg
+
+  # Concurrent User Testing
+  concurrent-testing:
+    name: 👥 Concurrent User Testing
+    runs-on: ubuntu-latest
+    needs: setup-test-environment
+    if: needs.setup-test-environment.outputs.environment-ready == 'true' && (github.event.inputs.test_suite == 'concurrent-user-test' || github.event.inputs.test_suite == 'comprehensive')
+
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: 📦 Install Concurrency Testing Tools
+        run: |
+          pip install asyncio aiohttp websockets concurrent.futures
+
+      - name: 👥 Run Concurrent User Tests
+        run: |
+          echo "👥 Starting concurrent user tests..."
+
+          # Test various concurrent user scenarios
+          python tests/performance/concurrent_test.py \
+            --base-url http://localhost:8000 \
+            --scenarios tests/performance/scenarios/concurrent_scenarios.yaml \
+            --output concurrent-test-results.json
+
+      - name: 📊 Upload Concurrent Test Results
+        uses: actions/upload-artifact@v3
+        with:
+          name: concurrent-test-results
+          path: concurrent-test-results.json
+
+  # Performance Report Generation
+  generate-performance-report:
+    name: 📊 Generate Performance Report
+    runs-on: ubuntu-latest
+    needs: [load-testing, stress-testing, resource-testing, concurrent-testing]
+    if: always()
+
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: 📥 Download All Test Results
+        uses: actions/download-artifact@v3
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: 📦 Install Report Generation Tools
+        run: |
+          pip install jinja2 matplotlib seaborn plotly pandas
+
+      - name: 📊 Generate Comprehensive Report
+        run: |
+          echo "📊 Generating comprehensive performance report..."
+
+          python tests/performance/generate_comprehensive_report.py \
+            --load-results load-test-results/ \
+            --stress-results stress-test-results/ \
+            --resource-results resource-test-results/ \
+            --concurrent-results concurrent-test-results/ \
+            --output performance-report.html
+
+      - name: 📊 Upload Performance Report
+        uses: actions/upload-artifact@v3
+        with:
+          name: performance-report
+          path: performance-report.html
+
+      - name: 💬 Comment Performance Results
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `## ⚡ Performance Test Results\n\n📊 Comprehensive performance report generated!\n\n**Test Results:**\n- Load Testing: ${{ needs.load-testing.result }}\n- Stress Testing: ${{ needs.stress-testing.result }}\n- Resource Testing: ${{ needs.resource-testing.result }}\n- Concurrent Testing: ${{ needs.concurrent-testing.result }}\n\nCheck the artifacts for detailed reports.`
+            })
+
+  # Cleanup
+  cleanup:
+    name: 🧹 Cleanup
+    runs-on: ubuntu-latest
+    needs: [generate-performance-report]
+    if: always()
+
+    steps:
+      - name: 🧹 Cleanup Test Environment
+        run: |
+          echo "🧹 Cleaning up test environment..."
+          docker-compose down -v || true
+          docker system prune -f || true

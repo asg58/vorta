@@ -1,0 +1,1 @@
+# Placeholder for generate-certificates.sh

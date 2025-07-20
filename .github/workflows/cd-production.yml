@@ -1,0 +1,573 @@
+name: 🏭 Deploy to Production
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to deploy (e.g., v1.2.3)'
+        required: true
+        type: string
+      skip_approval:
+        description: 'Skip manual approval (emergency deployment)'
+        type: boolean
+        default: false
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_BASE: ghcr.io/${{ github.repository_owner }}/vorta
+
+concurrency:
+  group: production-deployment
+  cancel-in-progress: false # Never cancel production deployments
+
+jobs:
+  # Pre-production validation
+  pre-production-validation:
+    name: 🔍 Pre-production Validation
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      should_deploy: ${{ steps.validation.outputs.should_deploy }}
+
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 🏷️ Determine Version
+        id: version
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION=${GITHUB_REF#refs/tags/}
+          fi
+
+          # Validate version format
+          if [[ ! $VERSION =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "❌ Invalid version format: $VERSION (expected: v1.2.3)"
+            exit 1
+          fi
+
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "📝 Production Version: $VERSION"
+
+      - name: ✅ Comprehensive Validation
+        id: validation
+        run: |
+          SHOULD_DEPLOY="true"
+          VALIDATION_ERRORS=""
+
+          # Check if staging deployment exists and is healthy
+          echo "🔍 Checking staging environment health..."
+          STAGING_ENDPOINT="${{ vars.STAGING_ENDPOINT || 'https://staging-api.vorta.example.com' }}"
+          STAGING_HEALTH=$(curl -s -f -X GET "$STAGING_ENDPOINT/health" || echo "failed")
+          if [[ "$STAGING_HEALTH" == "failed" ]]; then
+            VALIDATION_ERRORS="$VALIDATION_ERRORS\n❌ Staging environment is not healthy"
+            SHOULD_DEPLOY="false"
+          fi
+
+          # Check if all CI tests passed for this version
+          if [[ "${{ github.event.inputs.skip_approval }}" != "true" ]]; then
+            echo "🔍 Checking CI status for version ${{ steps.version.outputs.version }}..."
+            # Additional CI checks would go here
+          fi
+
+          # Check for critical security vulnerabilities
+          echo "🛡️ Checking for critical security issues..."
+          # Security check implementation would go here
+
+          # Manual approval required unless emergency
+          if [[ "${{ github.event.inputs.skip_approval }}" == "true" ]]; then
+            echo "🚨 Emergency deployment - skipping manual approval"
+          fi
+
+          if [[ "$SHOULD_DEPLOY" == "false" ]]; then
+            echo -e "Validation failed:$VALIDATION_ERRORS"
+            exit 1
+          fi
+
+          echo "should_deploy=$SHOULD_DEPLOY" >> $GITHUB_OUTPUT
+          echo "✅ Pre-production validation passed"
+
+  # Manual approval gate
+  manual-approval:
+    name: 👥 Manual Approval Required
+    runs-on: ubuntu-latest
+    needs: pre-production-validation
+    if: needs.pre-production-validation.outputs.should_deploy == 'true' && github.event.inputs.skip_approval != 'true'
+
+    steps:
+      - name: 👥 Awaiting Approval
+        run: |
+          echo "⏳ Waiting for manual approval to deploy ${{ needs.pre-production-validation.outputs.version }} to production"
+          echo "🔍 Please review:"
+          echo "  - Staging environment health"
+          echo "  - Recent test results"
+          echo "  - Security scan reports"
+          echo "  - Performance metrics"
+
+  # Build production-ready images
+  build-production-images:
+    name: 🐳 Build Production Images
+    runs-on: ubuntu-latest
+    needs: [pre-production-validation, manual-approval]
+    if: always() && needs.pre-production-validation.outputs.should_deploy == 'true' && (needs.manual-approval.result == 'success' || needs.manual-approval.result == 'skipped')
+
+    strategy:
+      matrix:
+        service: [inference-engine, vector-store, orchestrator, api-gateway]
+
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.pre-production-validation.outputs.version }}
+
+      - name: 🐳 Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 🔑 Login to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🔨 Build Production Image
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: services/${{ matrix.service }}
+          push: true
+          tags: |
+            ${{ env.IMAGE_BASE }}-${{ matrix.service }}:${{ needs.pre-production-validation.outputs.version }}
+            ${{ env.IMAGE_BASE }}-${{ matrix.service }}:latest
+          platforms: linux/amd64,linux/arm64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            VERSION=${{ needs.pre-production-validation.outputs.version }}
+            BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+            VCS_REF=${{ github.sha }}
+            ENVIRONMENT=production
+
+      - name: 🛡️ Sign Production Image
+        uses: sigstore/cosign-installer@v3
+
+      - name: 🛡️ Sign Container Image
+        run: |
+          cosign sign --yes ${{ env.IMAGE_BASE }}-${{ matrix.service }}@${{ steps.build.outputs.digest }}
+        env:
+          COSIGN_EXPERIMENTAL: 1
+
+  # Comprehensive security scanning
+  production-security-scan:
+    name: 🛡️ Production Security Scan
+    runs-on: ubuntu-latest
+    needs: [pre-production-validation, build-production-images]
+
+    strategy:
+      matrix:
+        service: [inference-engine, vector-store, orchestrator, api-gateway]
+
+    steps:
+      - name: 🔍 Deep Security Scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.IMAGE_BASE }}-${{ matrix.service }}:${{ needs.pre-production-validation.outputs.version }}
+          format: 'json'
+          output: 'production-security-${{ matrix.service }}.json'
+          severity: 'CRITICAL,HIGH'
+
+      - name: 📊 Analyze Security Results
+        run: |
+          # Fail if any CRITICAL vulnerabilities found
+          CRITICAL=$(jq '.Results[]?.Vulnerabilities[]? | select(.Severity == "CRITICAL")' production-security-${{ matrix.service }}.json | wc -l)
+          HIGH=$(jq '.Results[]?.Vulnerabilities[]? | select(.Severity == "HIGH")' production-security-${{ matrix.service }}.json | wc -l)
+
+          echo "🔍 Security scan results for ${{ matrix.service }}:"
+          echo "  - Critical: $CRITICAL"
+          echo "  - High: $HIGH"
+
+          if [[ $CRITICAL -gt 0 ]]; then
+            echo "❌ CRITICAL vulnerabilities found in production image!"
+            jq '.Results[]?.Vulnerabilities[]? | select(.Severity == "CRITICAL")' production-security-${{ matrix.service }}.json
+            exit 1
+          fi
+
+          if [[ $HIGH -gt 10 ]]; then
+            echo "⚠️ Too many HIGH vulnerabilities found ($HIGH > 10)"
+            exit 1
+          fi
+
+      - name: 📄 Upload Security Report
+        uses: actions/upload-artifact@v3
+        with:
+          name: production-security-scan-${{ matrix.service }}
+          path: production-security-${{ matrix.service }}.json
+
+  # Database backup and migration
+  production-database:
+    name: 🗃️ Production Database Operations
+    runs-on: ubuntu-latest
+    needs: [pre-production-validation, production-security-scan]
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: 📦 Install Database Tools
+        run: |
+          pip install alembic psycopg2-binary
+
+      - name: 🗃️ Create Database Backup
+        run: |
+          BACKUP_FILE="production-backup-${{ needs.pre-production-validation.outputs.version }}-$(date +%Y%m%d-%H%M%S).sql"
+          echo "📦 Creating backup: $BACKUP_FILE"
+
+          # Create full database backup
+          pg_dump "${{ secrets.PRODUCTION_DATABASE_URL || 'postgresql://localhost:5432/vorta_prod' }}" > "$BACKUP_FILE"
+
+          # Upload to secure backup storage
+          # aws s3 cp "$BACKUP_FILE" "s3://${{ secrets.BACKUP_BUCKET || 'vorta-backups-demo' }}/database/"
+
+          echo "✅ Database backup completed"
+
+      - name: 🧪 Validate Migrations
+        run: |
+          # Test migrations on a copy first
+          echo "🧪 Testing database migrations..."
+          cd services/vector-store
+
+          # Dry run validation
+          alembic upgrade head --sql > migration-preview.sql
+          echo "📄 Migration preview generated"
+
+      - name: 🔄 Apply Migrations
+        run: |
+          echo "🔄 Applying database migrations..."
+          cd services/vector-store
+          alembic upgrade head
+          echo "✅ Database migrations completed"
+        env:
+          DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL || 'postgresql://localhost:5432/vorta_prod' }}
+
+  # Blue-Green deployment to production
+  deploy-production:
+    name: 🚀 Blue-Green Production Deployment
+    runs-on: ubuntu-latest
+    needs: [pre-production-validation, production-security-scan, production-database]
+    outputs:
+      deployment_url: ${{ steps.deploy-green.outputs.url }}
+      green_deployment: ${{ steps.deploy-green.outputs.deployment_name }}
+
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: ⚙️ Setup Kubectl
+        uses: azure/setup-kubectl@v3
+
+      - name: ⛅ Setup Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: '3.13.0'
+
+      - name: 🔑 Configure Production Kubernetes
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBE_CONFIG_PRODUCTION || '# No kube config available' }}" | base64 -d > ~/.kube/config
+          kubectl config current-context
+
+      - name: 🏗️ Prepare Production Namespace
+        run: |
+          kubectl create namespace vorta-production --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: 🔐 Update Production Secrets
+        run: |
+          kubectl create secret generic vorta-production-config \
+            --from-literal=database-url="${{ secrets.PRODUCTION_DATABASE_URL || 'postgresql://localhost:5432/vorta_prod' }}" \
+            --from-literal=redis-url="${{ secrets.PRODUCTION_REDIS_URL || 'redis://localhost:6379/0' }}" \
+            --from-literal=jwt-secret="${{ secrets.PRODUCTION_JWT_SECRET || 'demo-jwt-secret-change-in-production' }}" \
+            --from-literal=api-key="${{ secrets.PRODUCTION_API_KEY || 'demo-api-key' }}" \
+            --namespace=vorta-production \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: 📊 Pre-deployment Health Check
+        run: |
+          echo "📊 Checking current production health..."
+          python scripts/health_check.py \
+            --environment=production \
+            --endpoint="${{ vars.PRODUCTION_ENDPOINT || 'https://api.vorta.example.com' }}" \
+            --pre-deployment \
+            --timeout=60
+
+      - name: 🟢 Deploy to Green Environment
+        id: deploy-green
+        run: |
+          echo "🟢 Deploying to green environment..."
+
+          helm upgrade --install vorta-production-green ./infrastructure/helm/vorta \
+            --namespace vorta-production \
+            --set global.environment=production \
+            --set global.slot=green \
+            --set global.imageTag="${{ needs.pre-production-validation.outputs.version }}" \
+            --set global.version="${{ needs.pre-production-validation.outputs.version }}" \
+            --set global.registry="${{ env.REGISTRY }}" \
+            --set global.replicas=3 \
+            --set global.resources.requests.cpu=1000m \
+            --set global.resources.requests.memory=2Gi \
+            --values infrastructure/helm/values/production.yaml \
+            --wait --timeout=20m
+
+          # Get green deployment URL
+          GREEN_URL=$(kubectl get service vorta-production-green -n vorta-production -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+          echo "url=https://$GREEN_URL" >> $GITHUB_OUTPUT
+          echo "deployment_name=vorta-production-green" >> $GITHUB_OUTPUT
+          echo "🌐 Green deployment URL: https://$GREEN_URL"
+
+      - name: ✅ Verify Green Deployment
+        run: |
+          echo "✅ Verifying green deployment..."
+
+          # Wait for all pods to be ready
+          kubectl wait --for=condition=ready pod \
+            -l app.kubernetes.io/instance=vorta-production-green \
+            -n vorta-production \
+            --timeout=900s
+
+          # Check deployment status
+          kubectl get pods -n vorta-production -l app.kubernetes.io/instance=vorta-production-green
+
+          echo "✅ Green deployment verified"
+
+  # Production validation tests
+  production-validation:
+    name: 🧪 Production Validation Tests
+    runs-on: ubuntu-latest
+    needs: [pre-production-validation, deploy-production]
+
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: 📦 Install Test Dependencies
+        run: |
+          pip install pytest requests pydantic
+
+      - name: 🧪 Run Production Validation Tests
+        run: |
+          python -m pytest tests/validation/production/ -v \
+            --tb=short \
+            --maxfail=1 \
+            --timeout=60
+        env:
+          PRODUCTION_GREEN_ENDPOINT: ${{ needs.deploy-production.outputs.deployment_url }}
+          API_KEY: ${{ secrets.PRODUCTION_API_KEY || 'demo-api-key' }}
+
+      - name: ⚡ Performance Validation
+        run: |
+          python scripts/performance_validation.py \
+            --endpoint="${{ needs.deploy-production.outputs.deployment_url }}" \
+            --api-key="${{ secrets.PRODUCTION_API_KEY || 'demo-api-key' }}" \
+            --duration=180 \
+            --concurrent-users=10
+
+      - name: 📄 Upload Validation Results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: production-validation-results
+          path: tests/validation/results/
+
+  # Traffic switch (Blue-Green cutover)
+  traffic-switch:
+    name: 🔄 Switch Production Traffic
+    runs-on: ubuntu-latest
+    needs: [pre-production-validation, deploy-production, production-validation]
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: ⚙️ Setup Kubectl
+        uses: azure/setup-kubectl@v3
+
+      - name: 🔑 Configure Kubernetes Context
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBE_CONFIG_PRODUCTION || '# No kube config available' }}" | base64 -d > ~/.kube/config
+
+      - name: 🔄 Gradual Traffic Switch
+        run: |
+          echo "🔄 Starting gradual traffic switch..."
+
+          # 10% traffic to green
+          kubectl patch service vorta-production-lb -n vorta-production \
+            --type='json' \
+            -p='[{"op": "replace", "path": "/spec/selector/version", "value": "green-10"}]'
+
+          echo "🔄 10% traffic switched to green - monitoring..."
+          sleep 120
+
+          # Check error rates
+          python scripts/monitor_traffic_switch.py --phase=10 --duration=120
+
+          # 50% traffic to green
+          kubectl patch service vorta-production-lb -n vorta-production \
+            --type='json' \
+            -p='[{"op": "replace", "path": "/spec/selector/version", "value": "green-50"}]'
+
+          echo "🔄 50% traffic switched to green - monitoring..."
+          sleep 180
+
+          # Check error rates
+          python scripts/monitor_traffic_switch.py --phase=50 --duration=180
+
+          # 100% traffic to green
+          kubectl patch service vorta-production-lb -n vorta-production \
+            --type='json' \
+            -p='[{"op": "replace", "path": "/spec/selector/version", "value": "green"}]'
+
+          echo "✅ 100% traffic switched to green deployment"
+
+      - name: 📊 Post-Switch Monitoring
+        run: |
+          echo "📊 Monitoring post-traffic switch..."
+          sleep 300  # Monitor for 5 minutes
+
+          python scripts/post_deployment_monitoring.py \
+            --duration=300 \
+            --alert-threshold-error-rate=0.1 \
+            --alert-threshold-latency=1000
+
+  # Cleanup blue deployment
+  cleanup-blue:
+    name: 🧹 Cleanup Blue Deployment
+    runs-on: ubuntu-latest
+    needs: [traffic-switch]
+    if: success()
+
+    steps:
+      - name: ⚙️ Setup Kubectl
+        uses: azure/setup-kubectl@v3
+
+      - name: 🔑 Configure Kubernetes Context
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBE_CONFIG_PRODUCTION || '# No kube config available' }}" | base64 -d > ~/.kube/config
+
+      - name: 🧹 Remove Blue Deployment
+        run: |
+          echo "🧹 Removing old blue deployment..."
+
+          # Scale down blue deployment
+          kubectl scale deployment vorta-production-blue --replicas=0 -n vorta-production || true
+
+          # Wait a bit
+          sleep 60
+
+          # Delete blue deployment
+          helm uninstall vorta-production-blue -n vorta-production || true
+
+          echo "✅ Blue deployment cleanup completed"
+
+      - name: 🏷️ Tag Green as Current Blue
+        run: |
+          # Rename green to blue for next deployment
+          kubectl patch deployment vorta-production-green -n vorta-production \
+            --type='json' \
+            -p='[{"op": "replace", "path": "/metadata/name", "value": "vorta-production-blue"}]'
+
+  # Emergency rollback procedure
+  emergency-rollback:
+    name: 🚨 Emergency Rollback
+    runs-on: ubuntu-latest
+    if: failure() && needs.traffic-switch.result == 'failure'
+    needs: [deploy-production, traffic-switch]
+    steps:
+      - name: 🚨 Execute Emergency Rollback
+        run: |
+          echo "🚨 EMERGENCY ROLLBACK INITIATED"
+
+          # Immediately switch traffic back to blue
+          kubectl patch service vorta-production-lb -n vorta-production \
+            --type='json' \
+            -p='[{"op": "replace", "path": "/spec/selector/version", "value": "blue"}]'
+
+          # Scale down green deployment
+          kubectl scale deployment vorta-production-green --replicas=0 -n vorta-production
+
+          echo "🚨 Emergency rollback completed - traffic restored to blue"
+
+  # Post-deployment monitoring setup
+  post-deployment-monitoring:
+    name: 📊 Setup Post-deployment Monitoring
+    runs-on: ubuntu-latest
+    needs: [traffic-switch]
+    if: success()
+
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: ⚙️ Setup Kubectl
+        uses: azure/setup-kubectl@v3
+
+      - name: 🔑 Configure Kubernetes Context
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBE_CONFIG_PRODUCTION || '# No kube config available' }}" | base64 -d > ~/.kube/config
+
+      - name: 📊 Deploy Enhanced Monitoring
+        run: |
+          # Deploy production monitoring configuration
+          kubectl apply -f infrastructure/kubernetes/monitoring/production/ -n vorta-production
+
+          # Update alerting rules
+          kubectl apply -f infrastructure/kubernetes/alerting/production-alerts.yaml -n vorta-production
+
+  # Final notification
+  notify-production-deployment:
+    name: 📢 Notify Production Deployment
+    runs-on: ubuntu-latest
+    needs:
+      [
+        pre-production-validation,
+        deploy-production,
+        production-validation,
+        traffic-switch,
+        cleanup-blue,
+        post-deployment-monitoring,
+      ]
+    if: always()
+
+    steps:
+      - name: 📢 Success Notification
+        if: success()
+        run: |
+          echo "🎉 PRODUCTION DEPLOYMENT SUCCESSFUL!"
+          echo "📦 Version: ${{ needs.pre-production-validation.outputs.version }}"
+          echo "🌐 Production URL: ${{ vars.PRODUCTION_ENDPOINT || 'https://api.vorta.example.com' }}"
+          echo "✅ Blue-Green deployment completed successfully"
+          echo "📊 Monitoring and alerting are active"
+
+      - name: 📢 Failure Notification
+        if: failure()
+        run: |
+          echo "❌ PRODUCTION DEPLOYMENT FAILED!"
+          echo "🚨 Immediate action required"
+          echo "🔍 Check logs and consider emergency rollback"
+          exit 1

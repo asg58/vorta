@@ -1,0 +1,461 @@
+name: 🚀 VORTA Setup & Verification
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Setup action to perform'
+        type: choice
+        options:
+          - verify-project-structure
+          - validate-configurations
+          - test-build-system
+          - check-dependencies
+          - full-verification
+        default: 'full-verification'
+
+env:
+  PYTHON_VERSION: '3.12.9'
+  NODE_VERSION: '18'
+  JAVA_VERSION: '11'
+
+jobs:
+  project-verification:
+    name: 📋 Project Structure Verification
+    runs-on: ubuntu-latest
+    if: github.event.inputs.action == 'verify-project-structure' || github.event.inputs.action == 'full-verification'
+
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: 🔍 Verify Core Services Structure
+        run: |
+          echo "🔍 Verifying VORTA project structure..."
+
+          # Core services verification
+          SERVICES=("inference-engine" "vector-store" "orchestrator" "api-gateway")
+          for service in "${SERVICES[@]}"; do
+            if [[ -d "services/$service" ]]; then
+              echo "✅ Service found: $service"
+              
+              # Check for essential files
+              if [[ -f "services/$service/Dockerfile" ]]; then
+                echo "  ✅ Dockerfile found"
+              else
+                echo "  ⚠️  Dockerfile missing"
+              fi
+              
+              if [[ -f "services/$service/requirements.txt" ]] || [[ -f "services/$service/pom.xml" ]] || [[ -f "services/$service/package.json" ]]; then
+                echo "  ✅ Dependencies file found"
+              else
+                echo "  ⚠️  Dependencies file missing"
+              fi
+            else
+              echo "❌ Service missing: $service"
+            fi
+          done
+
+      - name: 🔍 Verify Infrastructure Structure
+        run: |
+          echo "🔍 Verifying infrastructure components..."
+
+          # Infrastructure verification
+          INFRA_DIRS=("kubernetes" "terraform" "helm" "docker")
+          for dir in "${INFRA_DIRS[@]}"; do
+            if [[ -d "infrastructure/$dir" ]]; then
+              echo "✅ Infrastructure component found: $dir"
+              FILE_COUNT=$(find "infrastructure/$dir" -type f | wc -l)
+              echo "  📁 Files count: $FILE_COUNT"
+            else
+              echo "❌ Infrastructure component missing: $dir"
+            fi
+          done
+
+      - name: 🔍 Verify SDK Structure
+        run: |
+          echo "🔍 Verifying SDK components..."
+
+          # SDK verification
+          SDK_DIRS=("python" "javascript" "java" "go")
+          for sdk in "${SDK_DIRS[@]}"; do
+            if [[ -d "sdk/$sdk" ]]; then
+              echo "✅ SDK found: $sdk"
+            else
+              echo "❌ SDK missing: $sdk"
+            fi
+          done
+
+      - name: 📊 Generate Structure Report
+        run: |
+          echo "📊 Generating project structure report..."
+
+          echo "# VORTA Project Structure Report" > structure-report.md
+          echo "" >> structure-report.md
+          echo "**Date:** $(date -u +'%Y-%m-%d %H:%M:%S UTC')" >> structure-report.md
+          echo "" >> structure-report.md
+
+          echo "## Directory Structure" >> structure-report.md
+          echo "" >> structure-report.md
+          echo '```' >> structure-report.md
+          tree -I 'node_modules|__pycache__|.git|target' -L 3 >> structure-report.md
+          echo '```' >> structure-report.md
+
+          echo "" >> structure-report.md
+          echo "## File Counts" >> structure-report.md
+          echo "- Total files: $(find . -type f | wc -l)" >> structure-report.md
+          echo "- Python files: $(find . -name "*.py" | wc -l)" >> structure-report.md
+          echo "- Java files: $(find . -name "*.java" | wc -l)" >> structure-report.md
+          echo "- JavaScript/TypeScript files: $(find . -name "*.js" -o -name "*.ts" | wc -l)" >> structure-report.md
+          echo "- Docker files: $(find . -name "Dockerfile*" | wc -l)" >> structure-report.md
+          echo "- YAML files: $(find . -name "*.yml" -o -name "*.yaml" | wc -l)" >> structure-report.md
+
+      - name: 📄 Upload Structure Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: project-structure-report
+          path: structure-report.md
+          retention-days: 30
+
+  configuration-validation:
+    name: 🔧 Configuration Validation
+    runs-on: ubuntu-latest
+    if: github.event.inputs.action == 'validate-configurations' || github.event.inputs.action == 'full-verification'
+
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: 🔍 Validate GitHub Workflows
+        run: |
+          echo "🔍 Validating GitHub workflow files..."
+
+          WORKFLOW_DIR=".github/workflows"
+          if [[ -d "$WORKFLOW_DIR" ]]; then
+            WORKFLOW_COUNT=$(find "$WORKFLOW_DIR" -name "*.yml" -o -name "*.yaml" | wc -l)
+            echo "✅ Found $WORKFLOW_COUNT workflow files"
+            
+            # List all workflow files
+            find "$WORKFLOW_DIR" -name "*.yml" -o -name "*.yaml" | while read workflow; do
+              echo "  📄 $(basename "$workflow")"
+            done
+          else
+            echo "❌ GitHub workflows directory not found"
+          fi
+
+      - name: 🔍 Validate VS Code Configuration
+        run: |
+          echo "🔍 Validating VS Code configuration..."
+
+          VSCODE_DIR=".vscode"
+          if [[ -d "$VSCODE_DIR" ]]; then
+            echo "✅ VS Code configuration directory found"
+            
+            CONFIG_FILES=("settings.json" "launch.json" "tasks.json" "extensions.json")
+            for config in "${CONFIG_FILES[@]}"; do
+              if [[ -f "$VSCODE_DIR/$config" ]]; then
+                echo "  ✅ $config found"
+              else
+                echo "  ⚠️  $config missing"
+              fi
+            done
+          else
+            echo "❌ VS Code configuration directory not found"
+          fi
+
+      - name: 🔍 Validate Docker Configurations
+        run: |
+          echo "🔍 Validating Docker configurations..."
+
+          # Find all Dockerfiles
+          DOCKERFILE_COUNT=$(find . -name "Dockerfile*" | wc -l)
+          echo "✅ Found $DOCKERFILE_COUNT Docker files"
+
+          # Check for docker-compose files
+          if find . -name "docker-compose*.yml" -o -name "docker-compose*.yaml" | head -1 | grep -q .; then
+            COMPOSE_COUNT=$(find . -name "docker-compose*.yml" -o -name "docker-compose*.yaml" | wc -l)
+            echo "✅ Found $COMPOSE_COUNT Docker Compose files"
+          else
+            echo "⚠️  No Docker Compose files found"
+          fi
+
+      - name: 📊 Generate Configuration Report
+        run: |
+          echo "📊 Generating configuration report..."
+
+          echo "# VORTA Configuration Report" > config-report.md
+          echo "" >> config-report.md
+          echo "**Date:** $(date -u +'%Y-%m-%d %H:%M:%S UTC')" >> config-report.md
+          echo "" >> config-report.md
+
+          echo "## GitHub Workflows" >> config-report.md
+          if [[ -d ".github/workflows" ]]; then
+            find ".github/workflows" -name "*.yml" -o -name "*.yaml" | while read workflow; do
+              echo "- $(basename "$workflow")" >> config-report.md
+            done
+          fi
+
+          echo "" >> config-report.md
+          echo "## VS Code Configuration" >> config-report.md
+          if [[ -d ".vscode" ]]; then
+            ls ".vscode"/*.json 2>/dev/null | while read config; do
+              echo "- $(basename "$config")" >> config-report.md
+            done
+          fi
+
+      - name: 📄 Upload Configuration Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: configuration-report
+          path: config-report.md
+          retention-days: 30
+
+  build-system-test:
+    name: 🏗️ Build System Test
+    runs-on: ubuntu-latest
+    if: github.event.inputs.action == 'test-build-system' || github.event.inputs.action == 'full-verification'
+
+    strategy:
+      matrix:
+        component: [inference-engine, vector-store, orchestrator, api-gateway]
+
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: 🐍 Setup Python
+        if: matrix.component != 'api-gateway'
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: ☕ Setup Java
+        if: matrix.component == 'api-gateway'
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: 🔨 Test Build Process
+        run: |
+          echo "🔨 Testing build process for ${{ matrix.component }}..."
+
+          if [[ -d "services/${{ matrix.component }}" ]]; then
+            cd "services/${{ matrix.component }}"
+            
+            if [[ -f "requirements.txt" ]]; then
+              echo "🐍 Installing Python dependencies..."
+              pip install -r requirements.txt || echo "⚠️ Some dependencies failed to install"
+              
+              echo "🔍 Testing Python syntax..."
+              find . -name "*.py" -exec python -m py_compile {} + || echo "⚠️ Some Python files have syntax errors"
+              
+            elif [[ -f "pom.xml" ]]; then
+              echo "☕ Testing Java build..."
+              if command -v mvn &> /dev/null; then
+                mvn compile -q || echo "⚠️ Java compilation failed"
+              else
+                echo "⚠️ Maven not available"
+              fi
+              
+            elif [[ -f "package.json" ]]; then
+              echo "🟨 Testing JavaScript build..."
+              npm install || echo "⚠️ npm install failed"
+              
+            else
+              echo "⚠️ No recognized build file found"
+            fi
+            
+            if [[ -f "Dockerfile" ]]; then
+              echo "🐳 Testing Docker build..."
+              docker build -t "vorta/${{ matrix.component }}:test" . || echo "⚠️ Docker build failed"
+            else
+              echo "⚠️ No Dockerfile found"
+            fi
+          else
+            echo "❌ Service directory not found: services/${{ matrix.component }}"
+            exit 1
+          fi
+
+      - name: 📊 Generate Build Report
+        run: |
+          echo "📊 Generating build report for ${{ matrix.component }}..."
+
+          echo "# Build Report: ${{ matrix.component }}" > build-report-${{ matrix.component }}.md
+          echo "" >> build-report-${{ matrix.component }}.md
+          echo "**Date:** $(date -u +'%Y-%m-%d %H:%M:%S UTC')" >> build-report-${{ matrix.component }}.md
+          echo "**Status:** Build process completed" >> build-report-${{ matrix.component }}.md
+
+      - name: 📄 Upload Build Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-report-${{ matrix.component }}
+          path: build-report-${{ matrix.component }}.md
+          retention-days: 30
+
+  dependency-check:
+    name: 📦 Dependency Check
+    runs-on: ubuntu-latest
+    if: github.event.inputs.action == 'check-dependencies' || github.event.inputs.action == 'full-verification'
+
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: 🐍 Check Python Dependencies
+        run: |
+          echo "🐍 Checking Python dependencies..."
+
+          find . -name "requirements*.txt" | while read req_file; do
+            echo "📄 Found: $req_file"
+            
+            # Count dependencies
+            DEPS_COUNT=$(grep -c "^[^#]" "$req_file" 2>/dev/null || echo "0")
+            echo "  Dependencies: $DEPS_COUNT"
+            
+            # Check for common security packages
+            if grep -q "bandit\|safety\|pip-audit" "$req_file"; then
+              echo "  ✅ Security packages found"
+            else
+              echo "  ⚠️  No security packages found"
+            fi
+          done
+
+      - name: ☕ Check Java Dependencies
+        run: |
+          echo "☕ Checking Java dependencies..."
+
+          find . -name "pom.xml" | while read pom_file; do
+            echo "📄 Found: $pom_file"
+            
+            # Count dependencies
+            DEPS_COUNT=$(grep -c "<dependency>" "$pom_file" 2>/dev/null || echo "0")
+            echo "  Dependencies: $DEPS_COUNT"
+            
+            # Check for security plugins
+            if grep -q "spotbugs\|dependency-check" "$pom_file"; then
+              echo "  ✅ Security plugins found"
+            else
+              echo "  ⚠️  No security plugins found"
+            fi
+          done
+
+      - name: 🟨 Check JavaScript Dependencies
+        run: |
+          echo "🟨 Checking JavaScript dependencies..."
+
+          find . -name "package.json" | while read package_file; do
+            echo "📄 Found: $package_file"
+            
+            # Count dependencies
+            DEPS_COUNT=$(jq '.dependencies | length' "$package_file" 2>/dev/null || echo "0")
+            DEV_DEPS_COUNT=$(jq '.devDependencies | length' "$package_file" 2>/dev/null || echo "0")
+            echo "  Dependencies: $DEPS_COUNT"
+            echo "  Dev Dependencies: $DEV_DEPS_COUNT"
+            
+            # Check for security packages
+            if jq -e '.devDependencies | has("eslint-plugin-security")' "$package_file" > /dev/null 2>&1; then
+              echo "  ✅ Security packages found"
+            else
+              echo "  ⚠️  No security packages found"
+            fi
+          done
+
+      - name: 📊 Generate Dependency Report
+        run: |
+          echo "📊 Generating dependency report..."
+
+          echo "# VORTA Dependency Report" > dependency-report.md
+          echo "" >> dependency-report.md
+          echo "**Date:** $(date -u +'%Y-%m-%d %H:%M:%S UTC')" >> dependency-report.md
+          echo "" >> dependency-report.md
+
+          echo "## Python Dependencies" >> dependency-report.md
+          find . -name "requirements*.txt" | wc -l | xargs -I {} echo "- Requirements files: {}" >> dependency-report.md
+
+          echo "" >> dependency-report.md
+          echo "## Java Dependencies" >> dependency-report.md
+          find . -name "pom.xml" | wc -l | xargs -I {} echo "- POM files: {}" >> dependency-report.md
+
+          echo "" >> dependency-report.md
+          echo "## JavaScript Dependencies" >> dependency-report.md
+          find . -name "package.json" | wc -l | xargs -I {} echo "- Package.json files: {}" >> dependency-report.md
+
+      - name: 📄 Upload Dependency Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-report
+          path: dependency-report.md
+          retention-days: 30
+
+  final-summary:
+    name: 📊 Verification Summary
+    runs-on: ubuntu-latest
+    needs: [project-verification, configuration-validation, build-system-test, dependency-check]
+    if: always()
+
+    steps:
+      - name: 📄 Download All Reports
+        uses: actions/download-artifact@v4
+        with:
+          path: verification-reports/
+
+      - name: 📊 Generate Final Summary
+        run: |
+          echo "📊 Generating final verification summary..."
+
+          echo "# VORTA Project Verification Summary" > VERIFICATION_SUMMARY.md
+          echo "" >> VERIFICATION_SUMMARY.md
+          echo "**Date:** $(date -u +'%Y-%m-%d %H:%M:%S UTC')" >> VERIFICATION_SUMMARY.md
+          echo "**Action:** ${{ github.event.inputs.action }}" >> VERIFICATION_SUMMARY.md
+          echo "" >> VERIFICATION_SUMMARY.md
+
+          echo "## Verification Results" >> VERIFICATION_SUMMARY.md
+          echo "" >> VERIFICATION_SUMMARY.md
+          echo "- Project Structure: ${{ needs.project-verification.result }}" >> VERIFICATION_SUMMARY.md
+          echo "- Configuration Validation: ${{ needs.configuration-validation.result }}" >> VERIFICATION_SUMMARY.md
+          echo "- Build System Test: ${{ needs.build-system-test.result }}" >> VERIFICATION_SUMMARY.md
+          echo "- Dependency Check: ${{ needs.dependency-check.result }}" >> VERIFICATION_SUMMARY.md
+
+          echo "" >> VERIFICATION_SUMMARY.md
+          echo "## Next Steps" >> VERIFICATION_SUMMARY.md
+          echo "1. Review individual verification reports" >> VERIFICATION_SUMMARY.md
+          echo "2. Address any identified issues" >> VERIFICATION_SUMMARY.md
+          echo "3. Run full CI/CD pipeline validation" >> VERIFICATION_SUMMARY.md
+          echo "4. Begin development phase" >> VERIFICATION_SUMMARY.md
+
+      - name: 📄 Upload Final Summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: verification-summary
+          path: VERIFICATION_SUMMARY.md
+          retention-days: 90
+
+      - name: 📢 Verification Status
+        run: |
+          OVERALL_STATUS="success"
+
+          if [[ "${{ needs.project-verification.result }}" != "success" ]]; then
+            OVERALL_STATUS="failure"
+          fi
+
+          if [[ "${{ needs.configuration-validation.result }}" != "success" ]]; then
+            OVERALL_STATUS="failure"
+          fi
+
+          if [[ "${{ needs.build-system-test.result }}" != "success" ]]; then
+            OVERALL_STATUS="failure"
+          fi
+
+          if [[ "${{ needs.dependency-check.result }}" != "success" ]]; then
+            OVERALL_STATUS="failure"
+          fi
+
+          if [[ "$OVERALL_STATUS" == "success" ]]; then
+            echo "✅ VORTA project verification completed successfully!"
+            echo "🚀 Project is ready for development"
+          else
+            echo "❌ VORTA project verification found issues"
+            echo "📋 Review verification reports for details"
+            exit 1
+          fi

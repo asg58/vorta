@@ -1,0 +1,1 @@
+# Placeholder for blue-green-deploy.sh

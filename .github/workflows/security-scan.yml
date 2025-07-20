@@ -1,0 +1,398 @@
+name: 🛡️ Security Scan
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      scan_type:
+        description: 'Type of security scan'
+        type: choice
+        options:
+          - full-scan
+          - code-only
+          - dependencies-only
+          - container-only
+        default: 'full-scan'
+
+env:
+  PYTHON_VERSION: '3.12.9'
+  NODE_VERSION: '18'
+  JAVA_VERSION: '11'
+
+jobs:
+  code-security:
+    name: 🔍 Code Security Analysis
+    runs-on: ubuntu-latest
+    if: github.event.inputs.scan_type == 'full-scan' || github.event.inputs.scan_type == 'code-only' || github.event.inputs.scan_type == ''
+
+    permissions:
+      security-events: write
+      contents: read
+
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 🔍 Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: python, java, javascript
+          queries: security-extended,security-and-quality
+
+      - name: 🏗️ Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: 🔍 Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+
+      - name: 🐍 Python Security Scan
+        run: |
+          pip install bandit safety
+
+          echo "🔍 Running Bandit security scan..."
+          if find . -name "*.py" -path "./services/*" -o -path "./shared/*" -o -path "./sdk/python/*" | head -1 | grep -q .; then
+            bandit -r services/ shared/libraries/python/ sdk/python/ -f json -o bandit-report.json || true
+            
+            HIGH_ISSUES=$(jq -r '[.results[] | select(.issue_severity == "HIGH")] | length' bandit-report.json 2>/dev/null || echo "0")
+            echo "High severity issues: $HIGH_ISSUES"
+            
+            if [[ $HIGH_ISSUES -gt 0 ]]; then
+              echo "❌ High severity security issues found!"
+              exit 1
+            fi
+          else
+            echo "No Python files found to scan"
+          fi
+
+      - name: ☕ Java Security Scan
+        run: |
+          if [[ -d "services/api-gateway" && -f "services/api-gateway/pom.xml" ]]; then
+            cd services/api-gateway
+            ./mvnw compile spotbugs:check || true
+            ./mvnw spotbugs:spotbugs || true
+          else
+            echo "No Java project found to scan"
+          fi
+
+      - name: 🟨 JavaScript Security Scan
+        run: |
+          if [[ -d "sdk/javascript" && -f "sdk/javascript/package.json" ]]; then
+            cd sdk/javascript
+            npm install --silent
+            npm audit --audit-level=moderate || true
+          else
+            echo "No JavaScript project found to scan"
+          fi
+
+      - name: 📄 Upload Security Reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: code-security-reports
+          path: |
+            bandit-report.json
+            services/api-gateway/target/spotbugsXml.xml
+          retention-days: 30
+
+  dependency-security:
+    name: 🔒 Dependency Security Scan
+    runs-on: ubuntu-latest
+    if: github.event.inputs.scan_type == 'full-scan' || github.event.inputs.scan_type == 'dependencies-only' || github.event.inputs.scan_type == ''
+
+    strategy:
+      matrix:
+        language: [python, java, javascript]
+
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: 🐍 Python Dependencies
+        if: matrix.language == 'python'
+        run: |
+          pip install safety pip-audit
+
+          echo "🔍 Scanning Python dependencies..."
+          VULN_COUNT=0
+
+          if find . -name "requirements*.txt" | head -1 | grep -q .; then
+            for req_file in $(find . -name "requirements*.txt"); do
+              echo "Scanning $req_file"
+              safety check -r "$req_file" --json --output "safety-$(basename $req_file).json" || true
+              pip-audit --requirement "$req_file" --format=json --output="audit-$(basename $req_file).json" || true
+            done
+            
+            # Count total vulnerabilities
+            for f in safety-*.json; do
+              if [[ -f "$f" ]]; then
+                COUNT=$(jq 'length' "$f" 2>/dev/null || echo "0")
+                VULN_COUNT=$((VULN_COUNT + COUNT))
+              fi
+            done
+            
+            echo "Total Python vulnerabilities found: $VULN_COUNT"
+          else
+            echo "No Python requirements files found"
+          fi
+
+      - name: ☕ Java Dependencies
+        if: matrix.language == 'java'
+        run: |
+          echo "🔍 Scanning Java dependencies..."
+
+          if find . -name "pom.xml" | head -1 | grep -q .; then
+            for pom_file in $(find . -name "pom.xml"); do
+              pom_dir=$(dirname "$pom_file")
+              echo "Scanning $pom_dir"
+              cd "$pom_dir"
+              
+              mvn org.owasp:dependency-check-maven:check -DfailBuildOnCVSS=7 || true
+              mvn versions:display-dependency-updates -DoutputFile=dependency-updates.txt || true
+              
+              cd - > /dev/null
+            done
+          else
+            echo "No Java projects found"
+          fi
+
+      - name: 🟨 JavaScript Dependencies
+        if: matrix.language == 'javascript'
+        run: |
+          echo "🔍 Scanning JavaScript dependencies..."
+
+          if find . -name "package.json" | head -1 | grep -q .; then
+            for package_file in $(find . -name "package.json"); do
+              package_dir=$(dirname "$package_file")
+              echo "Scanning $package_dir"
+              cd "$package_dir"
+              
+              if [[ -f package-lock.json ]]; then
+                npm audit --audit-level=moderate --json > npm-audit.json || true
+              fi
+              
+              cd - > /dev/null
+            done
+          else
+            echo "No JavaScript projects found"
+          fi
+
+      - name: 📊 Generate Summary
+        run: |
+          echo "📊 Generating dependency security summary..."
+
+          echo "# Dependency Security Summary" > dependency-security-summary.md
+          echo "" >> dependency-security-summary.md
+          echo "## Scan Results" >> dependency-security-summary.md
+          echo "" >> dependency-security-summary.md
+
+          # Python results
+          PYTHON_VULNS=0
+          if ls safety-*.json 1> /dev/null 2>&1; then
+            for f in safety-*.json; do
+              COUNT=$(jq 'length' "$f" 2>/dev/null || echo "0")
+              PYTHON_VULNS=$((PYTHON_VULNS + COUNT))
+            done
+          fi
+          echo "- Python vulnerabilities: $PYTHON_VULNS" >> dependency-security-summary.md
+
+          # Java results
+          JAVA_VULNS=$(find . -name "dependency-check-report.json" -exec jq '.dependencies[].vulnerabilities | length' {} + 2>/dev/null | awk '{sum+=$1} END {print sum+0}')
+          echo "- Java vulnerabilities: $JAVA_VULNS" >> dependency-security-summary.md
+
+          # JavaScript results
+          JS_VULNS=$(find . -name "npm-audit.json" -exec jq '.metadata.vulnerabilities.total // 0' {} + 2>/dev/null | awk '{sum+=$1} END {print sum+0}')
+          echo "- JavaScript vulnerabilities: $JS_VULNS" >> dependency-security-summary.md
+
+      - name: 📄 Upload Reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dependency-security-reports-${{ matrix.language }}
+          path: |
+            safety-*.json
+            audit-*.json
+            dependency-check-report.*
+            npm-audit.json
+            dependency-security-summary.md
+          retention-days: 30
+
+  container-security:
+    name: 🐳 Container Security Scan
+    runs-on: ubuntu-latest
+    if: github.event.inputs.scan_type == 'full-scan' || github.event.inputs.scan_type == 'container-only' || github.event.inputs.scan_type == ''
+
+    strategy:
+      matrix:
+        service: [inference-engine, vector-store, orchestrator, api-gateway]
+
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: 🐳 Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 🔨 Build Container Image
+        run: |
+          if [[ -d "services/${{ matrix.service }}" && -f "services/${{ matrix.service }}/Dockerfile" ]]; then
+            cd services/${{ matrix.service }}
+            docker build -t vorta/${{ matrix.service }}:security-scan .
+          else
+            echo "No Dockerfile found for ${{ matrix.service }}"
+            exit 0
+          fi
+
+      - name: 🔍 Trivy Security Scan
+        uses: aquasecurity/trivy-action@master
+        if: success()
+        with:
+          image-ref: vorta/${{ matrix.service }}:security-scan
+          format: 'json'
+          output: 'trivy-${{ matrix.service }}.json'
+
+      - name: 📊 Analyze Results
+        if: success()
+        run: |
+          if [[ -f "trivy-${{ matrix.service }}.json" ]]; then
+            CRITICAL=$(jq '.Results[]?.Vulnerabilities[]? | select(.Severity == "CRITICAL")' trivy-${{ matrix.service }}.json | wc -l)
+            HIGH=$(jq '.Results[]?.Vulnerabilities[]? | select(.Severity == "HIGH")' trivy-${{ matrix.service }}.json | wc -l)
+            
+            echo "Container security results for ${{ matrix.service }}:"
+            echo "- Critical: $CRITICAL"
+            echo "- High: $HIGH"
+            
+            if [[ $CRITICAL -gt 0 ]]; then
+              echo "❌ CRITICAL vulnerabilities found in ${{ matrix.service }}"
+              exit 1
+            fi
+          fi
+
+      - name: 📄 Upload Container Reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: container-security-reports-${{ matrix.service }}
+          path: trivy-${{ matrix.service }}.json
+          retention-days: 30
+
+  secret-scan:
+    name: 🔐 Secret Scanning
+    runs-on: ubuntu-latest
+    if: github.event.inputs.scan_type == 'full-scan' || github.event.inputs.scan_type == ''
+
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 🔍 GitLeaks Scan
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🔍 TruffleHog Scan
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/trufflesecurity/trufflehog/main/scripts/install.sh | sh -s -- -b /usr/local/bin
+
+          echo "🔍 Scanning for secrets..."
+          trufflehog filesystem . --json --no-verification > trufflehog-results.json || true
+
+          SECRETS_FOUND=$(jq '. | length' trufflehog-results.json 2>/dev/null || echo "0")
+          echo "Secrets found: $SECRETS_FOUND"
+
+          if [[ $SECRETS_FOUND -gt 0 ]]; then
+            echo "❌ Secrets detected in repository!"
+            exit 1
+          fi
+
+      - name: 📄 Upload Secret Reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: secret-scan-reports
+          path: trufflehog-results.json
+          retention-days: 30
+
+  security-summary:
+    name: 📊 Security Summary
+    runs-on: ubuntu-latest
+    needs: [code-security, dependency-security, container-security, secret-scan]
+    if: always()
+
+    steps:
+      - name: 📄 Download Reports
+        uses: actions/download-artifact@v4
+        with:
+          path: security-reports/
+
+      - name: 📊 Generate Summary
+        run: |
+          echo "📊 Generating consolidated security report..."
+
+          echo "# VORTA Security Scan Report" > SECURITY_REPORT.md
+          echo "" >> SECURITY_REPORT.md
+          echo "**Date:** $(date -u +'%Y-%m-%d %H:%M:%S UTC')" >> SECURITY_REPORT.md
+          echo "**Scan Type:** ${{ github.event.inputs.scan_type || 'full-scan' }}" >> SECURITY_REPORT.md
+          echo "**Trigger:** ${{ github.event_name }}" >> SECURITY_REPORT.md
+          echo "" >> SECURITY_REPORT.md
+          echo "## Summary" >> SECURITY_REPORT.md
+          echo "" >> SECURITY_REPORT.md
+          echo "This report consolidates security findings across all VORTA components." >> SECURITY_REPORT.md
+          echo "" >> SECURITY_REPORT.md
+          echo "## Component Status" >> SECURITY_REPORT.md
+
+          # Check job results
+          echo "- Code Security: ${{ needs.code-security.result }}" >> SECURITY_REPORT.md
+          echo "- Dependency Security: ${{ needs.dependency-security.result }}" >> SECURITY_REPORT.md  
+          echo "- Container Security: ${{ needs.container-security.result }}" >> SECURITY_REPORT.md
+          echo "- Secret Scanning: ${{ needs.secret-scan.result }}" >> SECURITY_REPORT.md
+
+          echo "" >> SECURITY_REPORT.md
+          echo "## Next Steps" >> SECURITY_REPORT.md
+          echo "1. Review individual scan results" >> SECURITY_REPORT.md
+          echo "2. Address critical vulnerabilities immediately" >> SECURITY_REPORT.md
+          echo "3. Plan remediation for high/medium issues" >> SECURITY_REPORT.md
+
+      - name: 📄 Upload Summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-summary-report
+          path: SECURITY_REPORT.md
+          retention-days: 90
+
+      - name: 📝 Create Security Issue
+        if: failure()
+        uses: peter-evans/create-issue-from-file@v5
+        with:
+          title: '🚨 Security Vulnerabilities Detected - ${{ github.run_id }}'
+          content-filepath: SECURITY_REPORT.md
+          labels: |
+            security
+            vulnerability
+            urgent
+
+  notify:
+    name: 📢 Notification
+    runs-on: ubuntu-latest
+    needs: [security-summary]
+    if: always()
+
+    steps:
+      - name: 📢 Status Notification
+        run: |
+          if [[ "${{ needs.security-summary.result }}" == "success" ]]; then
+            echo "✅ Security scan completed successfully"
+            echo "🔍 All security checks passed"
+          else
+            echo "❌ Security vulnerabilities detected"
+            echo "� Review security reports for details"
+            exit 1
+          fi

@@ -1,0 +1,1 @@
+# Placeholder for 003-faiss-vector-search.md

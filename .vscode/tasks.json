@@ -1,0 +1,178 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Setup Development Environment",
+      "type": "shell",
+      "command": "make",
+      "args": ["setup-dev"],
+      "group": "build",
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "shared",
+        "showReuseMessage": true
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Start Development Services",
+      "type": "shell",
+      "command": "make",
+      "args": ["start-dev"],
+      "group": "build",
+      "isBackground": true,
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "shared"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Run All Tests",
+      "type": "shell",
+      "command": "make",
+      "args": ["test"],
+      "group": "test",
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "shared"
+      },
+      "problemMatcher": ["$python"]
+    },
+    {
+      "label": "Lint Code",
+      "type": "shell",
+      "command": "make",
+      "args": ["lint"],
+      "group": "build",
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "shared"
+      },
+      "problemMatcher": ["$python", "$tsc"]
+    },
+    {
+      "label": "Format Code",
+      "type": "shell",
+      "command": "make",
+      "args": ["format"],
+      "group": "build",
+      "presentation": {
+        "echo": true,
+        "reveal": "silent",
+        "focus": false,
+        "panel": "shared"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Docker Build: Inference Engine",
+      "type": "shell",
+      "command": "docker",
+      "args": ["build", "-t", "vorta/inference-engine:dev", "./services/inference-engine"],
+      "group": "build",
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "shared"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Docker Build: API Gateway",
+      "type": "shell",
+      "command": "docker",
+      "args": ["build", "-t", "vorta/api-gateway:dev", "./services/api-gateway"],
+      "group": "build",
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "shared"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Kubernetes Deploy: Development",
+      "type": "shell",
+      "command": "kubectl",
+      "args": ["apply", "-k", "./infrastructure/kubernetes/overlays/development"],
+      "group": "build",
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "shared"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Terraform Plan: Development",
+      "type": "shell",
+      "command": "terraform",
+      "args": ["plan"],
+      "options": {
+        "cwd": "${workspaceFolder}/infrastructure/terraform/environments/development"
+      },
+      "group": "build",
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "shared"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Stop Development Services",
+      "type": "shell",
+      "command": "make",
+      "args": ["stop-dev"],
+      "group": "build",
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "shared"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Clean Workspace",
+      "type": "shell",
+      "command": "make",
+      "args": ["clean"],
+      "group": "build",
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "shared"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Run Security Scan",
+      "type": "shell",
+      "command": "python",
+      "args": ["tools/security/scanners/dependency-scanner.py"],
+      "group": "build",
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "shared"
+      },
+      "problemMatcher": []
+    }
+  ]
+}

@@ -1,0 +1,429 @@
+name: 🔄 Continuous Integration
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+env:
+  PYTHON_VERSION: '3.12.9'
+  NODE_VERSION: '18'
+  JAVA_VERSION: '11'
+
+jobs:
+  # Code Quality and Security
+  code-quality:
+    name: 🔍 Code Quality & Security
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: 📦 Install Python Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install black isort flake8 mypy safety bandit
+          find . -name "requirements*.txt" -exec pip install -r {} \;
+
+      - name: 🎨 Python Code Formatting
+        run: |
+          black --check --diff services/ shared/libraries/python/ sdk/python/
+          isort --check-only --diff services/ shared/libraries/python/ sdk/python/
+
+      - name: 🔍 Python Linting
+        run: |
+          flake8 services/ shared/libraries/python/ sdk/python/
+          mypy services/inference-engine/src/ --ignore-missing-imports
+
+      - name: 🛡️ Security Scan - Python
+        run: |
+          safety check
+          bandit -r services/ shared/libraries/python/ sdk/python/ -f json -o bandit-report.json || true
+
+      - name: ☕ Setup Java
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'temurin'
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: 🔍 Java Code Quality
+        run: |
+          cd services/api-gateway
+          ./mvnw compile checkstyle:check spotbugs:check
+
+      - name: 🟨 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: sdk/javascript/package-lock.json
+
+      - name: 📦 Install Node Dependencies
+        run: |
+          cd sdk/javascript
+          npm ci
+
+      - name: 🔍 JavaScript/TypeScript Linting
+        run: |
+          cd sdk/javascript
+          npm run lint
+          npm run type-check
+
+      - name: 📄 Upload Security Reports
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: security-reports
+          path: |
+            bandit-report.json
+            **/target/spotbugsXml.xml
+
+  # Python Services Tests
+  test-python-services:
+    name: 🧪 Python Services Tests
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [inference-engine, vector-store, orchestrator]
+
+    services:
+      redis:
+        image: redis:alpine
+        ports:
+          - 6379:6379
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_DB: vorta_test
+          POSTGRES_USER: vorta
+          POSTGRES_PASSWORD: test_password
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: 📦 Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          cd services/${{ matrix.service }}
+          pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: 🧪 Run Unit Tests
+        run: |
+          cd services/${{ matrix.service }}
+          python -m pytest tests/unit/ -v --cov=src/ --cov-report=xml --cov-report=term-missing
+
+      - name: 🔗 Run Integration Tests
+        run: |
+          cd services/${{ matrix.service }}
+          python -m pytest tests/integration/ -v
+        env:
+          REDIS_HOST: localhost
+          POSTGRES_HOST: localhost
+
+      - name: 📊 Upload Coverage Reports
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./services/${{ matrix.service }}/coverage.xml
+          flags: ${{ matrix.service }}
+
+  # Java Service Tests
+  test-java-services:
+    name: ☕ Java Services Tests
+    runs-on: ubuntu-latest
+
+    services:
+      redis:
+        image: redis:alpine
+        ports:
+          - 6379:6379
+
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: ☕ Setup Java
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'temurin'
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: 📦 Cache Maven Dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.m2
+          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+          restore-keys: ${{ runner.os }}-m2
+
+      - name: 🧪 Run Tests
+        run: |
+          cd services/api-gateway
+          ./mvnw test
+        env:
+          REDIS_HOST: localhost
+
+      - name: 📊 Publish Test Results
+        uses: dorny/test-reporter@v1
+        if: success() || failure()
+        with:
+          name: Java Tests
+          path: services/api-gateway/target/surefire-reports/*.xml
+          reporter: java-junit
+
+  # SDK Tests
+  test-sdks:
+    name: 📚 SDK Tests
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        sdk: [python, javascript, java]
+
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: 🐍 Setup Python (for Python SDK)
+        if: matrix.sdk == 'python'
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: 🧪 Test Python SDK
+        if: matrix.sdk == 'python'
+        run: |
+          cd sdk/python
+          pip install -e .
+          pip install -r requirements-test.txt
+          python -m pytest tests/ -v
+
+      - name: 🟨 Setup Node.js (for JavaScript SDK)
+        if: matrix.sdk == 'javascript'
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: 🧪 Test JavaScript SDK
+        if: matrix.sdk == 'javascript'
+        run: |
+          cd sdk/javascript
+          npm ci
+          npm test
+
+      - name: ☕ Setup Java (for Java SDK)
+        if: matrix.sdk == 'java'
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'temurin'
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: 🧪 Test Java SDK
+        if: matrix.sdk == 'java'
+        run: |
+          cd sdk/java
+          ./mvnw test
+
+  # Docker Build Tests
+  docker-builds:
+    name: 🐳 Docker Build Tests
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [inference-engine, vector-store, orchestrator, api-gateway]
+
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: 🐳 Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 🔨 Build Docker Image
+        run: |
+          cd services/${{ matrix.service }}
+          docker build -t vorta/${{ matrix.service }}:test .
+
+      - name: 🛡️ Run Container Security Scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: vorta/${{ matrix.service }}:test
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: 📄 Upload Trivy Scan Results
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+  # Integration Tests
+  integration-tests:
+    name: 🔗 Integration Tests
+    runs-on: ubuntu-latest
+    needs: [test-python-services, test-java-services]
+
+    services:
+      redis:
+        image: redis:alpine
+        ports:
+          - 6379:6379
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_DB: vorta_integration
+          POSTGRES_USER: vorta
+          POSTGRES_PASSWORD: integration_password
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: 📦 Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r tests/requirements-test.txt
+
+      - name: 🐳 Start Services with Docker Compose
+        run: |
+          docker-compose -f docker-compose.yml -f tests/fixtures/environments/docker-compose.test.yml up -d
+          sleep 30  # Wait for services to be ready
+
+      - name: 🧪 Run Integration Tests
+        run: |
+          python -m pytest tests/integration/ -v --maxfail=5
+        env:
+          REDIS_HOST: localhost
+          POSTGRES_HOST: localhost
+
+      - name: 🧪 Run E2E Tests
+        run: |
+          python -m pytest tests/e2e/ -v --maxfail=3
+        env:
+          TEST_ENV: ci
+
+      - name: 📋 Collect Service Logs
+        if: failure()
+        run: |
+          docker-compose logs > service-logs.txt
+
+      - name: 📄 Upload Service Logs
+        if: failure()
+        uses: actions/upload-artifact@v3
+        with:
+          name: service-logs
+          path: service-logs.txt
+
+  # Infrastructure Validation
+  infrastructure-validation:
+    name: 🏗️ Infrastructure Validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: 🔧 Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.6.0
+
+      - name: ✅ Terraform Format Check
+        run: |
+          cd infrastructure/terraform
+          terraform fmt -check -recursive
+
+      - name: ✅ Terraform Validation
+        run: |
+          cd infrastructure/terraform/environments/development
+          terraform init -backend=false
+          terraform validate
+
+      - name: ⚙️ Setup Kubectl
+        uses: azure/setup-kubectl@v3
+
+      - name: ✅ Kubernetes Manifests Validation
+        run: |
+          find infrastructure/kubernetes -name "*.yaml" -o -name "*.yml" | \
+          xargs -I {} kubectl apply --dry-run=client -f {}
+
+  # Performance Benchmarks
+  performance-tests:
+    name: ⚡ Performance Tests
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: 📦 Install Dependencies
+        run: |
+          pip install locust pytest-benchmark
+          pip install -r services/inference-engine/requirements.txt
+
+      - name: ⚡ Run Performance Tests
+        run: |
+          python -m pytest tests/integration/performance/ -v --benchmark-json=benchmark.json
+
+      - name: 📊 Upload Benchmark Results
+        uses: actions/upload-artifact@v3
+        with:
+          name: performance-results
+          path: benchmark.json
+
+  # Notification
+  notify-completion:
+    name: 📢 Notify Completion
+    runs-on: ubuntu-latest
+    needs:
+      [
+        code-quality,
+        test-python-services,
+        test-java-services,
+        test-sdks,
+        docker-builds,
+        integration-tests,
+        infrastructure-validation,
+      ]
+    if: always()
+
+    steps:
+      - name: 📢 Notify Success
+        if: ${{ needs.code-quality.result == 'success' && needs.test-python-services.result == 'success' && needs.test-java-services.result == 'success' && needs.test-sdks.result == 'success' && needs.docker-builds.result == 'success' && needs.integration-tests.result == 'success' && needs.infrastructure-validation.result == 'success' }}
+        run: |
+          echo "🎉 All CI checks passed successfully!"
+
+      - name: 📢 Notify Failure
+        if: ${{ needs.code-quality.result == 'failure' || needs.test-python-services.result == 'failure' || needs.test-java-services.result == 'failure' || needs.test-sdks.result == 'failure' || needs.docker-builds.result == 'failure' || needs.integration-tests.result == 'failure' || needs.infrastructure-validation.result == 'failure' }}
+        run: |
+          echo "❌ One or more CI checks failed. Please review the logs."
+          exit 1

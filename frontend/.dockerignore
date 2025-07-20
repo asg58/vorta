@@ -1,0 +1,92 @@
+# VORTA ULTRA - MAXIMUM SPEED .dockerignore
+# Exclude everything not needed for fastest builds
+
+# Git files
+.git/
+.gitignore
+.github/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# Logs
+*.log
+logs/
+log/
+
+# Documentation
+docs/
+README.md
+CHANGELOG.md
+*.md
+
+# Tests
+tests/
+test/
+*_test.py
+test_*.py
+
+# Docker files
+Dockerfile*
+docker-compose*
+.dockerignore
+
+# Temporary files
+.tmp/
+tmp/
+temp/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Node modules (if any)
+node_modules/
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# Environment files with secrets
+.env*
+!.env.example
+
+# Large model files (optimize later)
+models/*.bin
+models/*.safetensors
+*.wav
+*.mp3
+*.mp4
+
+# Jupyter notebooks
+*.ipynb
+.ipynb_checkpoints/
+
+# Coverage reports
+htmlcov/
+.coverage
+.coverage.*
+
+# Database files
+*.db
+*.sqlite3
+
+# Cache directories
+.cache/
+.mypy_cache/

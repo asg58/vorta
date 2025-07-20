@@ -1,0 +1,334 @@
+name: 🤖 Smart Deployment Pipeline
+
+on:
+  workflow_run:
+    workflows: ['🔄 Continuous Integration']
+    branches: [main]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target deployment environment'
+        type: choice
+        options:
+          - development
+          - staging
+          - production
+        default: 'staging'
+      deployment_strategy:
+        description: 'Deployment strategy'
+        type: choice
+        options:
+          - blue-green
+          - rolling
+          - canary
+          - recreate
+        default: 'blue-green'
+      auto_approve:
+        description: 'Auto-approve deployment (skip manual approval)'
+        type: boolean
+        default: false
+      rollback_on_failure:
+        description: 'Auto-rollback on deployment failure'
+        type: boolean
+        default: true
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_BASE: ghcr.io/${{ github.repository_owner }}/vorta
+
+concurrency:
+  group: smart-deployment-${{ github.event.inputs.environment || 'staging' }}
+  cancel-in-progress: false
+
+jobs:
+  # Pre-deployment Analysis
+  pre-deployment-analysis:
+    name: 🔍 Pre-deployment Analysis
+    runs-on: ubuntu-latest
+    if: github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch'
+    outputs:
+      should_deploy: ${{ steps.analysis.outputs.should_deploy }}
+      deployment_risk: ${{ steps.analysis.outputs.risk_level }}
+      affected_services: ${{ steps.analysis.outputs.affected_services }}
+      deployment_strategy: ${{ steps.strategy.outputs.strategy }}
+
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12.9'
+
+      - name: 📊 Analyze Changes
+        id: analysis
+        run: |
+          echo "🔍 Analyzing changes for smart deployment..."
+
+          # Get changed files
+          CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD || echo "")
+          echo "Changed files: $CHANGED_FILES"
+
+          # Initialize variables
+          RISK_LEVEL="low"
+          SHOULD_DEPLOY="true"
+          AFFECTED_SERVICES=""
+
+          # Analyze risk based on changed files
+          if echo "$CHANGED_FILES" | grep -q "infrastructure/"; then
+            RISK_LEVEL="high"
+            echo "⚠️ Infrastructure changes detected - High risk"
+          elif echo "$CHANGED_FILES" | grep -q "services/"; then
+            RISK_LEVEL="medium"
+            echo "⚠️ Service changes detected - Medium risk"
+            
+            # Identify affected services
+            for service in inference-engine api-gateway vector-store orchestrator; do
+              if echo "$CHANGED_FILES" | grep -q "services/$service/"; then
+                AFFECTED_SERVICES="$AFFECTED_SERVICES,$service"
+              fi
+            done
+            AFFECTED_SERVICES=${AFFECTED_SERVICES#,}
+          fi
+
+          # Check if deployment should proceed
+          if [[ "$RISK_LEVEL" == "high" && "${{ github.event.inputs.auto_approve }}" != "true" ]]; then
+            SHOULD_DEPLOY="false"
+            echo "❌ High-risk deployment requires manual approval"
+          fi
+
+          echo "should_deploy=$SHOULD_DEPLOY" >> $GITHUB_OUTPUT
+          echo "risk_level=$RISK_LEVEL" >> $GITHUB_OUTPUT
+          echo "affected_services=$AFFECTED_SERVICES" >> $GITHUB_OUTPUT
+
+      - name: 🎯 Determine Deployment Strategy
+        id: strategy
+        run: |
+          STRATEGY="${{ github.event.inputs.deployment_strategy || 'blue-green' }}"
+          RISK_LEVEL="${{ steps.analysis.outputs.risk_level }}"
+
+          # Adjust strategy based on risk level
+          if [[ "$RISK_LEVEL" == "high" ]]; then
+            STRATEGY="canary"
+            echo "🎯 High risk detected, switching to canary deployment"
+          elif [[ "$RISK_LEVEL" == "medium" ]]; then
+            STRATEGY="blue-green"
+            echo "🎯 Medium risk detected, using blue-green deployment"
+          fi
+
+          echo "strategy=$STRATEGY" >> $GITHUB_OUTPUT
+          echo "Selected deployment strategy: $STRATEGY"
+
+  # Manual Approval for High-Risk Deployments
+  manual-approval:
+    name: ⏸️ Manual Approval Required
+    runs-on: ubuntu-latest
+    needs: pre-deployment-analysis
+    if: needs.pre-deployment-analysis.outputs.should_deploy == 'false'
+
+    steps:
+      - name: ⏸️ Waiting for Manual Approval
+        run: |
+          echo "⏸️ Manual approval required for high-risk deployment"
+          echo "Risk Level: ${{ needs.pre-deployment-analysis.outputs.deployment_risk }}"
+          echo "Affected Services: ${{ needs.pre-deployment-analysis.outputs.affected_services }}"
+
+  # Smart Deployment Execution
+  smart-deployment:
+    name: 🚀 Smart Deployment
+    runs-on: ubuntu-latest
+    needs: [pre-deployment-analysis, manual-approval]
+    if: always() && (needs.pre-deployment-analysis.outputs.should_deploy == 'true' || needs.manual-approval.result == 'success')
+    environment:
+      name: ${{ github.event.inputs.environment || 'staging' }}
+
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: 🔑 Login to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🏷️ Generate Deployment Tags
+        id: tags
+        run: |
+          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+          VERSION="$GITHUB_SHA-$TIMESTAMP"
+          ENVIRONMENT="${{ github.event.inputs.environment || 'staging' }}"
+
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "environment=$ENVIRONMENT" >> $GITHUB_OUTPUT
+          echo "timestamp=$TIMESTAMP" >> $GITHUB_OUTPUT
+
+      - name: 🐳 Build and Push Images
+        run: |
+          echo "🐳 Building and pushing images..."
+          AFFECTED_SERVICES="${{ needs.pre-deployment-analysis.outputs.affected_services }}"
+
+          if [[ -z "$AFFECTED_SERVICES" ]]; then
+            # Deploy all services if no specific services affected
+            SERVICES="inference-engine,api-gateway,vector-store,orchestrator"
+          else
+            SERVICES="$AFFECTED_SERVICES"
+          fi
+
+          IFS=',' read -ra SERVICE_ARRAY <<< "$SERVICES"
+          for service in "${SERVICE_ARRAY[@]}"; do
+            echo "Building $service..."
+            docker build -t ${{ env.IMAGE_BASE }}-$service:${{ steps.tags.outputs.version }} ./services/$service/
+            docker push ${{ env.IMAGE_BASE }}-$service:${{ steps.tags.outputs.version }}
+          done
+
+      - name: 🎯 Execute Deployment Strategy
+        run: |
+          STRATEGY="${{ needs.pre-deployment-analysis.outputs.deployment_strategy }}"
+          ENVIRONMENT="${{ steps.tags.outputs.environment }}"
+          VERSION="${{ steps.tags.outputs.version }}"
+
+          echo "🚀 Executing $STRATEGY deployment to $ENVIRONMENT"
+
+          case $STRATEGY in
+            "blue-green")
+              echo "🔵 Starting blue-green deployment..."
+              python scripts/deploy/blue_green_deploy.py \
+                --environment $ENVIRONMENT \
+                --version $VERSION \
+                --services "${{ needs.pre-deployment-analysis.outputs.affected_services }}"
+              ;;
+            "canary")
+              echo "🐤 Starting canary deployment..."
+              python scripts/deploy/canary_deploy.py \
+                --environment $ENVIRONMENT \
+                --version $VERSION \
+                --traffic-percentage 10 \
+                --services "${{ needs.pre-deployment-analysis.outputs.affected_services }}"
+              ;;
+            "rolling")
+              echo "🔄 Starting rolling deployment..."
+              python scripts/deploy/rolling_deploy.py \
+                --environment $ENVIRONMENT \
+                --version $VERSION \
+                --batch-size 1 \
+                --services "${{ needs.pre-deployment-analysis.outputs.affected_services }}"
+              ;;
+            "recreate")
+              echo "🔄 Starting recreate deployment..."
+              python scripts/deploy/recreate_deploy.py \
+                --environment $ENVIRONMENT \
+                --version $VERSION \
+                --services "${{ needs.pre-deployment-analysis.outputs.affected_services }}"
+              ;;
+          esac
+
+  # Post-Deployment Validation
+  post-deployment-validation:
+    name: ✅ Post-Deployment Validation
+    runs-on: ubuntu-latest
+    needs: [smart-deployment, pre-deployment-analysis]
+
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: 🔍 Health Checks
+        run: |
+          echo "🔍 Running post-deployment health checks..."
+          ENVIRONMENT="${{ github.event.inputs.environment || 'staging' }}"
+
+          # Wait for services to be ready
+          sleep 60
+
+          # Run health checks
+          python scripts/deploy/health_check.py \
+            --environment $ENVIRONMENT \
+            --services "${{ needs.pre-deployment-analysis.outputs.affected_services }}" \
+            --timeout 300
+
+      - name: 🧪 Smoke Tests
+        run: |
+          echo "🧪 Running smoke tests..."
+          python -m pytest tests/smoke/ -v --tb=short \
+            --environment ${{ github.event.inputs.environment || 'staging' }}
+
+      - name: 📊 Performance Validation
+        run: |
+          echo "📊 Validating performance metrics..."
+          python scripts/deploy/performance_validation.py \
+            --environment ${{ github.event.inputs.environment || 'staging' }} \
+            --baseline-comparison true
+
+  # Auto-Rollback on Failure
+  auto-rollback:
+    name: 🔄 Auto-Rollback
+    runs-on: ubuntu-latest
+    needs: [smart-deployment, post-deployment-validation, pre-deployment-analysis]
+    if: failure() && github.event.inputs.rollback_on_failure == 'true'
+
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: 🔄 Execute Rollback
+        run: |
+          echo "🔄 Executing automatic rollback..."
+          ENVIRONMENT="${{ github.event.inputs.environment || 'staging' }}"
+
+          python scripts/deploy/rollback.py \
+            --environment $ENVIRONMENT \
+            --services "${{ needs.pre-deployment-analysis.outputs.affected_services }}" \
+            --reason "Post-deployment validation failed"
+
+      - name: 📧 Notify Rollback
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.repos.createDeploymentStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              deployment_id: context.payload.deployment.id,
+              state: 'failure',
+              description: 'Deployment failed and was automatically rolled back'
+            })
+
+  # Deployment Notification
+  deployment-notification:
+    name: 📢 Deployment Notification
+    runs-on: ubuntu-latest
+    needs: [smart-deployment, post-deployment-validation, pre-deployment-analysis]
+    if: always()
+
+    steps:
+      - name: 📢 Notify Deployment Status
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const deploymentSuccess = '${{ needs.post-deployment-validation.result }}' === 'success';
+            const status = deploymentSuccess ? '✅ Successful' : '❌ Failed';
+            const environment = '${{ github.event.inputs.environment || 'staging' }}';
+            const strategy = '${{ needs.pre-deployment-analysis.outputs.deployment_strategy }}';
+
+            const message = `## 🚀 Smart Deployment ${status}\n\n` +
+              `**Environment:** ${environment}\n` +
+              `**Strategy:** ${strategy}\n` +
+              `**Risk Level:** ${{ needs.pre-deployment-analysis.outputs.deployment_risk }}\n` +
+              `**Affected Services:** ${{ needs.pre-deployment-analysis.outputs.affected_services }}\n\n` +
+              `**Results:**\n` +
+              `- Deployment: ${{ needs.smart-deployment.result }}\n` +
+              `- Validation: ${{ needs.post-deployment-validation.result }}`;
+              
+            if (context.eventName === 'pull_request') {
+              github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: message
+              });
+            }

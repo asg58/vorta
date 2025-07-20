@@ -1,0 +1,86 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Python: Inference Engine",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/services/inference-engine/src/main.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}/services/inference-engine",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/services/inference-engine/src"
+      },
+      "args": []
+    },
+    {
+      "name": "Python: Vector Store",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/services/vector-store/src/main.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}/services/vector-store",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/services/vector-store/src"
+      }
+    },
+    {
+      "name": "Python: Orchestrator",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/services/orchestrator/src/main.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}/services/orchestrator",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/services/orchestrator/src"
+      }
+    },
+    {
+      "name": "Docker: Build Inference Engine",
+      "type": "docker",
+      "request": "launch",
+      "preLaunchTask": "docker-build-inference",
+      "python": {
+        "pathMappings": [
+          {
+            "localRoot": "${workspaceFolder}/services/inference-engine",
+            "remoteRoot": "/app"
+          }
+        ],
+        "projectType": "fastapi"
+      }
+    },
+    {
+      "name": "Attach to Kubernetes Pod",
+      "type": "debugpy",
+      "request": "attach",
+      "connect": {
+        "host": "localhost",
+        "port": 5678
+      },
+      "pathMappings": [
+        {
+          "localRoot": "${workspaceFolder}",
+          "remoteRoot": "/app"
+        }
+      ]
+    },
+    {
+      "name": "Python: Current File",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${file}",
+      "console": "integratedTerminal",
+      "cwd": "${fileDirname}"
+    },
+    {
+      "name": "Python: Test Suite",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": ["${workspaceFolder}/tests/", "-v", "--tb=short"],
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}"
+    }
+  ]
+}

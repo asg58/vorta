@@ -1,0 +1,1 @@
+# Placeholder for 004-redis-caching-strategy.md
