@@ -1,1 +1,0 @@
-# Placeholder for api-security-scanner.py

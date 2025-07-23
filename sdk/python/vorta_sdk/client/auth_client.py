@@ -1,1 +1,0 @@
-# Placeholder for auth_client.py

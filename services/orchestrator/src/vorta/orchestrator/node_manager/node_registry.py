@@ -1,1 +1,0 @@
-# Placeholder for node_registry.py

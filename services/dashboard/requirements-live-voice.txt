@@ -1,0 +1,27 @@
+# VORTA Ultra AGI Voice Agent - Live Voice Requirements
+# Audio Processing
+librosa>=0.10.1
+openai-whisper>=20231117
+pydub>=0.25.1
+pyaudio>=0.2.11
+soundfile>=0.12.1
+TTS>=0.22.0
+webrtcvad>=2.0.10
+
+# Machine Learning
+torch>=2.1.0
+torchaudio>=2.1.0
+transformers>=4.35.0
+numpy>=1.24.0
+
+# Real-time Processing
+websockets>=12.0
+asyncio-mqtt>=0.13.0
+redis>=5.0.1
+
+# Voice Enhancement
+noisereduce>=3.0.0
+scipy>=1.11.0
+
+# WebRTC Support
+aiortc>=1.6.0

@@ -1,1 +1,0 @@
-# Placeholder for grpc_client.py

@@ -1,0 +1,140 @@
+{
+  "last_smart_startup": null,
+  "last_test_run": null,
+  "last_dashboard_use": null,
+  "last_quick_check": null,
+  "development_sessions": [],
+  "pattern_history": {},
+  "auto_decisions": [
+    {
+      "timestamp": "2025-07-20T21:48:19.368013",
+      "context": {
+        "timestamp": "2025-07-20T21:48:19.225870",
+        "system_state": {
+          "docker_containers": 6,
+          "containers_list": [
+            "vorta-ultra-api",
+            "vorta-ultra-grafana",
+            "vorta-ultra-minio",
+            "vorta-ultra-postgres",
+            "vorta-ultra-redis",
+            "vorta-ultra-prometheus"
+          ],
+          "docker_available": true
+        },
+        "development_activity": {
+          "recent_changes": true,
+          "git_activity": true,
+          "vscode_session_active": true
+        },
+        "service_health": {
+          "api": true,
+          "prometheus": true,
+          "grafana": true
+        },
+        "triggers_detected": [
+          "after_code_change",
+          "before_commit",
+          "development_start"
+        ]
+      },
+      "decisions": {
+        "recommended_tools": [
+          {
+            "tool": "smart_startup.py",
+            "priority": "critical",
+            "matching_triggers": [
+              "development_start"
+            ],
+            "auto_executable": true
+          },
+          {
+            "tool": "test_metrics.py",
+            "priority": "high",
+            "matching_triggers": [
+              "after_code_change",
+              "before_commit"
+            ],
+            "auto_executable": false
+          }
+        ],
+        "immediate_actions": [
+          "smart_startup.py"
+        ],
+        "scheduled_actions": [],
+        "reasoning": [
+          "smart_startup.py: development_start",
+          "test_metrics.py: after_code_change, before_commit"
+        ],
+        "auto_executable": [
+          "smart_startup.py"
+        ]
+      }
+    },
+    {
+      "timestamp": "2025-07-21T12:37:45.733680",
+      "context": {
+        "timestamp": "2025-07-21T12:37:42.525080",
+        "system_state": {
+          "docker_containers": 0,
+          "containers_list": [],
+          "docker_available": false
+        },
+        "development_activity": {
+          "recent_changes": true,
+          "git_activity": true,
+          "vscode_session_active": true
+        },
+        "service_health": {
+          "api": false,
+          "prometheus": false,
+          "grafana": false
+        },
+        "triggers_detected": [
+          "docker_stopped",
+          "system_fresh_start",
+          "services_down",
+          "after_code_change",
+          "before_commit",
+          "development_start"
+        ]
+      },
+      "decisions": {
+        "recommended_tools": [
+          {
+            "tool": "smart_startup.py",
+            "priority": "critical",
+            "matching_triggers": [
+              "development_start",
+              "docker_stopped",
+              "services_down"
+            ],
+            "auto_executable": true
+          },
+          {
+            "tool": "test_metrics.py",
+            "priority": "high",
+            "matching_triggers": [
+              "after_code_change",
+              "before_commit"
+            ],
+            "auto_executable": false
+          }
+        ],
+        "immediate_actions": [
+          "smart_startup.py"
+        ],
+        "scheduled_actions": [],
+        "reasoning": [
+          "smart_startup.py: development_start, docker_stopped, services_down",
+          "test_metrics.py: after_code_change, before_commit"
+        ],
+        "auto_executable": [
+          "smart_startup.py"
+        ]
+      }
+    }
+  ],
+  "last_updated": "2025-07-21T12:37:45.733680",
+  "intelligence_version": "2.0"
+}

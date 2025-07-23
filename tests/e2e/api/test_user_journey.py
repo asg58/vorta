@@ -1,1 +1,0 @@
-# Placeholder for test_user_journey.py

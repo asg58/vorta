@@ -1,0 +1,59 @@
+# VORTA Ultra AGI Voice Agent - Live Voice Docker Configuration
+FROM python:3.11.7-slim
+
+# Set working directory
+WORKDIR /app
+
+# Install system dependencies voor audio processing
+RUN apt-get update && apt-get install -y \
+    curl \
+    g++ \
+    gcc \
+    ffmpeg \
+    libsndfile1 \
+    portaudio19-dev \
+    alsa-utils \
+    pulseaudio \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements first for better caching
+COPY requirements.txt .
+COPY requirements-live-voice.txt .
+
+# Install Python dependencies
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt && \
+    pip install --no-cache-dir -r requirements-live-voice.txt
+
+# Install additional voice processing libraries
+RUN pip install --no-cache-dir \
+    openai-whisper \
+    TTS \
+    pydub \
+    webrtcvad \
+    pyaudio \
+    soundfile \
+    librosa \
+    torch \
+    torchaudio
+
+# Copy application code
+COPY . .
+
+# Create non-root user for security
+RUN useradd --create-home --shell /bin/bash vorta && \
+    chown -R vorta:vorta /app
+USER vorta
+
+# Create directories for voice data
+RUN mkdir -p /app/voice_data /app/models
+
+# Expose port for Ultra AGI Voice Agent
+EXPOSE 8888
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=45s --retries=3 \
+    CMD curl -f http://localhost:8888/health || exit 1
+
+# Start Ultra AGI Voice Agent with live voice capabilities
+CMD ["python", "ultra_agi_voice_agent.py", "--mode=live_voice", "--port=8888"]

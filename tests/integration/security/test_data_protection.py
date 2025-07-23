@@ -1,1 +1,0 @@
-# Placeholder for test_data_protection.py

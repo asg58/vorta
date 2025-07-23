@@ -1,1 +1,0 @@
-# Placeholder for vorta-metrics-exporter.py

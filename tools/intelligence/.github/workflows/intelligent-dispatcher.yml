@@ -1,0 +1,30 @@
+name: VORTA Intelligent Workflow Dispatcher
+'on':
+  push:
+    branches:
+    - main
+    - develop
+  pull_request:
+    branches:
+    - main
+  workflow_dispatch:
+    inputs:
+      intelligence_mode:
+        description: Enable intelligent workflow selection
+        required: false
+        default: 'true'
+        type: boolean
+jobs:
+  intelligent-dispatch:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.12'
+    - name: Run VORTA Intelligence Engine
+      run: python intelligence_engine.py --github-mode
+    - name: Trigger Selected Workflows
+      run: python github_workflow_intelligence.py --execute

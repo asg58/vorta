@@ -1,1 +1,0 @@
-# Placeholder for index_manager.py

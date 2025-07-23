@@ -1,0 +1,250 @@
+version: '3.8'
+
+services:
+  # Redis voor caching en session management - ULTRA PROFESSIONAL
+  redis:
+    image: redis:7-alpine
+    container_name: vorta-live-redis
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - vorta-live-network
+
+  # PostgreSQL voor metadata en gebruikersdata - ENTERPRISE GRADE
+  postgres:
+    image: postgres:15-alpine
+    container_name: vorta-live-postgres
+    environment:
+      POSTGRES_DB: vorta_live_voice
+      POSTGRES_USER: vorta_admin
+      POSTGRES_PASSWORD: VortaLiveVoice2024Secure
+      POSTGRES_INITDB_ARGS: '--auth-host=scram-sha-256'
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - '5433:5432' # Different port to avoid conflicts
+    volumes:
+      - postgres_live_data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/01-init-db.sql:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U vorta_admin -d vorta_live_voice']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - vorta-live-network
+
+  # 🎯 VORTA Ultra AGI Voice Agent - CORE AI BRAIN
+  ultra-agi-voice-agent:
+    build:
+      context: ./services/dashboard
+      dockerfile: Dockerfile.live-voice
+    container_name: vorta-ultra-agi-voice
+    ports:
+      - '8888:8888' # Ultra AGI Voice Agent port
+    environment:
+      - ENVIRONMENT=production
+      - DATABASE_URL=postgresql://vorta_admin:VortaLiveVoice2024Secure@postgres:5433/vorta_live_voice
+      - REDIS_URL=redis://redis:6379/0
+      - ULTRA_AGI_MODE=enabled
+      - LIVE_VOICE_ENABLED=true
+      - VOICE_MODEL_PATH=/app/models/voice
+      - TTS_MODEL=ultra_high_quality
+      - STT_MODEL=whisper_large_v3
+      - AI_MODEL=gpt4_turbo_enhanced
+    volumes:
+      - ./services/dashboard:/app
+      - ./shared:/app/shared:ro
+      - ./models:/app/models:ro
+      - voice_data:/app/voice_data
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -f http://localhost:8888/health || exit 1']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 45s
+    restart: unless-stopped
+    networks:
+      - vorta-live-network
+    depends_on:
+      - postgres
+      - redis
+      - inference-engine
+
+  # 🧠 Inference Engine - LIVE VOICE PROCESSING PIPELINE
+  inference-engine:
+    build:
+      context: ./services/inference-engine
+      dockerfile: Dockerfile.live-voice
+    container_name: vorta-inference-engine
+    ports:
+      - '8001:8001' # Inference Engine API
+    environment:
+      - ENVIRONMENT=production
+      - REDIS_URL=redis://redis:6379/1
+      - LIVE_VOICE_PIPELINE_ENABLED=true
+      - MAX_AUDIO_DURATION=300 # 5 minutes max
+      - PROCESSING_TIMEOUT=30 # 30 second timeout
+      - VOICE_QUALITY=ultra_high
+      - LATENCY_TARGET=1500 # <1.5s end-to-end
+    volumes:
+      - ./services/inference-engine:/app
+      - ./shared:/app/shared:ro
+      - ./models:/app/models:ro
+      - audio_cache:/app/audio_cache
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -f http://localhost:8001/health || exit 1']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 45s
+    restart: unless-stopped
+    networks:
+      - vorta-live-network
+    depends_on:
+      - redis
+
+  # 🌐 API Gateway - UNIFIED ENDPOINT FOR LIVE VOICE
+  api-gateway:
+    build:
+      context: ./services/api
+      dockerfile: Dockerfile.live-voice
+    container_name: vorta-api-gateway
+    ports:
+      - '8000:8000' # Main API Gateway
+    environment:
+      - ENVIRONMENT=production
+      - DATABASE_URL=postgresql://vorta_admin:VortaLiveVoice2024Secure@postgres:5433/vorta_live_voice
+      - REDIS_URL=redis://redis:6379/2
+      - INFERENCE_ENGINE_URL=http://inference-engine:8001
+      - ULTRA_AGI_URL=http://ultra-agi-voice-agent:8888
+      - LIVE_VOICE_WEBSOCKET_ENABLED=true
+      - CORS_ORIGINS=*
+    volumes:
+      - ./services/api:/app
+      - ./shared:/app/shared:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -f http://localhost:8000/health || exit 1']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - vorta-live-network
+    depends_on:
+      - postgres
+      - redis
+      - ultra-agi-voice-agent
+      - inference-engine
+
+  # 🎙️ Live Voice Interface - STREAMLIT FRONTEND
+  voice-interface:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.live-voice
+    container_name: vorta-voice-interface
+    ports:
+      - '8501:8501' # Streamlit port
+    environment:
+      - ENVIRONMENT=production
+      - API_GATEWAY_URL=http://api-gateway:8000
+      - LIVE_VOICE_ENABLED=true
+      - WEBSOCKET_URL=ws://api-gateway:8000/ws/live-voice
+      - AUDIO_SAMPLE_RATE=44100
+      - AUDIO_CHANNELS=1
+      - AUDIO_FORMAT=WAV
+    volumes:
+      - ./frontend:/app
+      - ./shared:/app/shared:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -f http://localhost:8501/_stcore/health || exit 1']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - vorta-live-network
+    depends_on:
+      - api-gateway
+
+  # 📊 Prometheus voor monitoring - ULTRA PROFESSIONAL
+  prometheus:
+    image: prom/prometheus:v2.47.0
+    container_name: vorta-live-prometheus
+    ports:
+      - '9091:9090' # Different port to avoid conflicts
+    volumes:
+      - ./config/prometheus/prometheus-live.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_live_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.enable-lifecycle'
+    healthcheck:
+      test:
+        ['CMD', 'wget', '--no-verbose', '--tries=1', '--spider', 'http://localhost:9090/-/healthy']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - vorta-live-network
+
+  # 📈 Grafana voor live voice dashboards
+  grafana:
+    image: grafana/grafana:10.2.0
+    container_name: vorta-live-grafana
+    ports:
+      - '3001:3000' # Different port to avoid conflicts
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=VortaLiveVoiceAdmin2024
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_DOMAIN=localhost
+      - GF_ANALYTICS_REPORTING_ENABLED=false
+    volumes:
+      - grafana_live_data:/var/lib/grafana
+      - ./config/grafana/dashboards/live-voice:/etc/grafana/provisioning/dashboards:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -f http://localhost:3000/api/health || exit 1']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - vorta-live-network
+    depends_on:
+      - prometheus
+
+networks:
+  vorta-live-network:
+    driver: bridge
+    name: vorta-live-voice-network
+
+volumes:
+  redis_data:
+    name: vorta-live-redis-data
+  postgres_live_data:
+    name: vorta-live-postgres-data
+  prometheus_live_data:
+    name: vorta-live-prometheus-data
+  grafana_live_data:
+    name: vorta-live-grafana-data
+  voice_data:
+    name: vorta-live-voice-data
+  audio_cache:
+    name: vorta-live-audio-cache

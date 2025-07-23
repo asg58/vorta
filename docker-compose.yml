@@ -1,3 +1,5 @@
+version: '3.8'
+
 services:
   # Redis voor caching en session management - ULTRA PROFESSIONAL
   redis:
@@ -7,8 +9,6 @@ services:
       - '6379:6379'
     volumes:
       - redis_data:/data
-      - ./config/redis.conf:/usr/local/etc/redis/redis.conf
-    command: redis-server /usr/local/etc/redis/redis.conf
     healthcheck:
       test: ['CMD', 'redis-cli', 'ping']
       interval: 10s
@@ -18,10 +18,6 @@ services:
     restart: unless-stopped
     networks:
       - vorta-ultra-network
-    environment:
-      - REDIS_DATABASES=16
-      - REDIS_MAXMEMORY=256mb
-      - REDIS_MAXMEMORY_POLICY=allkeys-lru
 
   # PostgreSQL voor metadata en gebruikersdata - ENTERPRISE GRADE
   postgres:
@@ -30,7 +26,7 @@ services:
     environment:
       POSTGRES_DB: vorta_ultra
       POSTGRES_USER: vorta_admin
-      POSTGRES_PASSWORD: VortaUltra2024!Secure
+      POSTGRES_PASSWORD: VortaUltra2024Secure
       POSTGRES_INITDB_ARGS: '--auth-host=scram-sha-256'
       PGDATA: /var/lib/postgresql/data/pgdata
     ports:
@@ -38,8 +34,6 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./config/postgresql/init-db.sql:/docker-entrypoint-initdb.d/01-init-db.sql:ro
-      - ./config/postgresql/create-tables.sql:/docker-entrypoint-initdb.d/02-create-tables.sql:ro
-      - ./config/postgresql/postgresql.conf:/etc/postgresql/postgresql.conf:ro
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U vorta_admin -d vorta_ultra']
       interval: 10s
@@ -57,18 +51,13 @@ services:
     ports:
       - '9090:9090'
     volumes:
-      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - ./config/prometheus/rules/:/etc/prometheus/rules/:ro
+      - ./config/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
       - '--storage.tsdb.retention.time=30d'
-      - '--storage.tsdb.retention.size=10GB'
-      - '--web.console.libraries=/etc/prometheus/console_libraries'
-      - '--web.console.templates=/etc/prometheus/consoles'
       - '--web.enable-lifecycle'
-      - '--web.enable-admin-api'
     healthcheck:
       test:
         ['CMD', 'wget', '--no-verbose', '--tries=1', '--spider', 'http://localhost:9090/-/healthy']
@@ -87,15 +76,12 @@ services:
     ports:
       - '3000:3000'
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=VortaUltraAdmin2024!
+      - GF_SECURITY_ADMIN_PASSWORD=VortaUltraAdmin2024
       - GF_USERS_ALLOW_SIGN_UP=false
       - GF_SERVER_DOMAIN=localhost
-      - GF_SERVER_ROOT_URL=http://localhost:3000
       - GF_ANALYTICS_REPORTING_ENABLED=false
     volumes:
       - grafana_data:/var/lib/grafana
-      - ./config/grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./config/grafana/dashboards:/etc/grafana/dashboards:ro
     healthcheck:
       test: ['CMD-SHELL', 'curl -f http://localhost:3000/api/health || exit 1']
       interval: 30s
@@ -106,119 +92,27 @@ services:
     networks:
       - vorta-ultra-network
     depends_on:
-      prometheus:
-        condition: service_healthy
+      - prometheus
 
-  # MinIO voor object storage - ENTERPRISE STORAGE
-  minio:
-    image: minio/minio:RELEASE.2023-11-20T22-40-07Z
-    container_name: vorta-ultra-minio
-    ports:
-      - '9000:9000'
-      - '9001:9001'
-    environment:
-      - MINIO_ROOT_USER=vorta_ultra_admin
-      - MINIO_ROOT_PASSWORD=VortaUltraStorage2024!Secure
-      - MINIO_BROWSER_REDIRECT_URL=http://localhost:9001
-    volumes:
-      - minio_data:/data
-    command: server /data --console-address ":9001"
-    healthcheck:
-      test: ['CMD', 'mc', 'ready', 'local']
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
-    restart: unless-stopped
-    networks:
-      - vorta-ultra-network
-
-  # Elasticsearch voor advanced search - ENTERPRISE SEARCH
-  elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
-    container_name: vorta-ultra-elasticsearch
-    environment:
-      - discovery.type=single-node
-      - xpack.security.enabled=false
-      - 'ES_JAVA_OPTS=-Xms512m -Xmx512m'
-    ports:
-      - '9200:9200'
-    volumes:
-      - elasticsearch_data:/usr/share/elasticsearch/data
-    healthcheck:
-      test: ['CMD-SHELL', 'curl -f http://localhost:9200/_cluster/health || exit 1']
-      interval: 30s
-      timeout: 10s
-      retries: 10
-      start_period: 60s
-    restart: unless-stopped
-    networks:
-      - vorta-ultra-network
-
-  # VORTA API Backend - ULTRA PROFESSIONAL SPEED OPTIMIZED
-  vorta-api:
+  # VORTA Ultra High-Grade Dashboard - REAL-TIME VOICE AGENT TESTING
+  ultra-dashboard:
     build:
-      context: .
-      dockerfile: services/api/Dockerfile
-      args:
-        - BUILDKIT_INLINE_CACHE=1
-      cache_from:
-        - vorta/api:latest
-    container_name: vorta-ultra-api
-    ports:
-      - '8000:8000'
-    environment:
-      - ENVIRONMENT=development
-      - DATABASE_URL=postgresql://vorta_admin:VortaUltra2024!Secure@postgres:5432/vorta_ultra
-      - REDIS_URL=redis://redis:6379/0
-      - MINIO_ENDPOINT=minio:9000
-      - MINIO_ACCESS_KEY=vorta_ultra_admin
-      - MINIO_SECRET_KEY=VortaUltraStorage2024!Secure
-      - ELASTICSEARCH_URL=http://elasticsearch:9200
-      - PROMETHEUS_MULTIPROC_DIR=/tmp
-    volumes:
-      - ./src:/app/src:ro
-      - ./models:/app/models
-      - api_logs:/app/logs
-    healthcheck:
-      test: ['CMD', 'curl', '-f', 'http://localhost:8000/api/health']
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 60s
-    restart: unless-stopped
-    networks:
-      - vorta-ultra-network
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      minio:
-        condition: service_healthy
-
-  # VORTA Dashboard - MAXIMUM SPEED STREAMLIT ULTRA
-  vorta-dashboard:
-    build:
-      context: ./frontend
+      context: ./services/dashboard
       dockerfile: Dockerfile
-      args:
-        - BUILDKIT_INLINE_CACHE=1
-        - PIP_NO_CACHE_DIR=1
-        - PIP_PREFER_BINARY=1
-      cache_from:
-        - vorta/dashboard:latest
     container_name: vorta-ultra-dashboard
     ports:
-      - '8501:8501'
+      - '8080:8080'
     environment:
-      - VORTA_API_URL=http://vorta-api:8000
-      - STREAMLIT_SERVER_HEADLESS=true
-      - STREAMLIT_BROWSER_GATHER_USAGE_STATS=false
+      - ENVIRONMENT=production
+      - DATABASE_URL=postgresql://vorta_admin:VortaUltraUltra2024Secure@postgres:5432/vorta_ultra
+      - REDIS_URL=redis://redis:6379/0
+      - API_V1_STR=/api/v1
+      - PROJECT_NAME=VORTA Ultra Dashboard
     volumes:
-      - ./frontend:/app:ro
+      - ./services/dashboard:/app
+      - ./shared:/app/shared:ro
     healthcheck:
-      test: ['CMD', 'curl', '-f', 'http://localhost:8501/_stcore/health']
+      test: ['CMD-SHELL', 'curl -f http://localhost:8080/health || exit 1']
       interval: 30s
       timeout: 10s
       retries: 3
@@ -227,18 +121,20 @@ services:
     networks:
       - vorta-ultra-network
     depends_on:
-      vorta-api:
-        condition: service_healthy
-
-volumes:
-  redis_data:
-  postgres_data:
-  prometheus_data:
-  grafana_data:
-  minio_data:
-  elasticsearch_data:
-  api_logs:
+      - postgres
+      - redis
 
 networks:
   vorta-ultra-network:
     driver: bridge
+    name: vorta-ultra-network
+
+volumes:
+  redis_data:
+    name: vorta-ultra-redis-data
+  postgres_data:
+    name: vorta-ultra-postgres-data
+  prometheus_data:
+    name: vorta-ultra-prometheus-data
+  grafana_data:
+    name: vorta-ultra-grafana-data

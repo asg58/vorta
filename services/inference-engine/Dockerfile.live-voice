@@ -1,0 +1,55 @@
+# VORTA Inference Engine - Live Voice Processing Pipeline
+FROM python:3.11.7-slim
+
+# Set working directory
+WORKDIR /app
+
+# Install system dependencies voor audio processing
+RUN apt-get update && apt-get install -y \
+    alsa-utils \
+    curl \
+    ffmpeg \
+    g++ \
+    gcc \
+    libsndfile1 \
+    portaudio19-dev \
+    pulseaudio \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements
+COPY requirements.txt .
+
+# Install Python dependencies
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt && \
+    pip install --no-cache-dir \
+    librosa \
+    openai-whisper \
+    pyaudio \
+    pydub \
+    soundfile \
+    torch \
+    torchaudio \
+    TTS \
+    webrtcvad
+
+# Copy application code
+COPY . .
+
+# Create non-root user for security
+RUN useradd --create-home --shell /bin/bash vorta && \
+    chown -R vorta:vorta /app
+USER vorta
+
+# Create directories for audio processing
+RUN mkdir -p /app/audio_cache /app/models
+
+# Expose port for Inference Engine
+EXPOSE 8001
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=45s --retries=3 \
+    CMD curl -f http://localhost:8001/health || exit 1
+
+# Start Inference Engine with live voice pipeline
+CMD ["python", "-m", "src.main", "--enable-live-voice", "--port=8001"]

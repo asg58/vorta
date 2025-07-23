@@ -1,1 +1,0 @@
-# Placeholder for health_check.py

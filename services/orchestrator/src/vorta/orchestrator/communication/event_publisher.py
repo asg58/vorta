@@ -1,1 +1,0 @@
-# Placeholder for event_publisher.py
