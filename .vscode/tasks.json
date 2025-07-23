@@ -173,6 +173,45 @@
         "panel": "shared"
       },
       "problemMatcher": []
+    },
+    {
+      "label": "🔄 Auto-Restore Chat Session",
+      "type": "shell",
+      "command": "python",
+      "args": [
+        "-c",
+        "import asyncio; from frontend.components.ai.chat_session_persistence import ChatSessionPersistenceManager; manager = ChatSessionPersistenceManager(); session_id = asyncio.run(manager.create_new_session(title='VS Code Auto-Restored Session', auto_restore=True)); print(f'🔄 Chat session auto-restored: {session_id}')"
+      ],
+      "group": "build",
+      "presentation": {
+        "echo": true,
+        "reveal": "silent",
+        "focus": false,
+        "panel": "shared",
+        "showReuseMessage": false
+      },
+      "problemMatcher": [],
+      "runOptions": {
+        "runOn": "folderOpen"
+      }
+    },
+    {
+      "label": "🚀 VORTA Startup: Auto-Restore + Services",
+      "type": "shell",
+      "command": "python",
+      "args": ["scripts/vorta_auto_startup.py"],
+      "group": "build",
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "shared"
+      },
+      "problemMatcher": [],
+      "runOptions": {
+        "runOn": "folderOpen"
+      },
+      "dependsOn": ["🔄 Auto-Restore Chat Session"]
     }
   ]
 }

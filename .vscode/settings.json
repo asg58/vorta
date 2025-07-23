@@ -1,4 +1,35 @@
 {
+  // VORTA Auto-Restore Configuration voor VS Code
+  "vorta.autoRestore": true,
+  "vorta.sessionPersistence": {
+    "enabled": true,
+    "autoBackupInterval": 30,
+    "maxSessions": 100,
+    "restoreStrategy": "context_restore"
+  },
+  "vorta.aiAssistant": {
+    "autoLoadContext": true,
+    "contextPreservation": "comprehensive",
+    "sessionContinuity": true,
+    "autoStartNewChat": true
+  },
+  "vorta.chatSettings": {
+    "persistConversations": true,
+    "maxContextHistory": 50,
+    "contextWindowHours": 24,
+    "autoRestoreOnStartup": true,
+    "backgroundBackup": true,
+    "smartContextSummary": true,
+    "crossSessionLearning": true
+  },
+  "vorta.startup": {
+    "autoRunStartupScript": true,
+    "showStartupNotification": true,
+    "validateEnvironment": true,
+    "preloadContext": true,
+    "checkServices": false
+  },
+
   // Python configuration
   "python.defaultInterpreterPath": "./venv/bin/python",
   "python.linting.enabled": true,

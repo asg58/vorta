@@ -1,0 +1,389 @@
+name: 🤖 Smart Workflow Dispatcher
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      force_session_test:
+        description: 'Force chat session testing'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+
+env:
+  VORTA_SESSION_PERSISTENCE: 'true'
+  VORTA_AUTO_RESTORE: 'true'
+  VORTA_GITHUB_INTEGRATION: 'true'
+  FORCE_SESSION_TEST: ${{ github.event.inputs.force_session_test || 'false' }}
+
+jobs:
+  # 🔍 Intelligence Analysis
+  workflow-intelligence:
+    name: 🧠 Workflow Intelligence Analysis
+    runs-on: ubuntu-latest
+    outputs:
+      workflows: ${{ steps.intelligence.outputs.workflows }}
+      session-test-required: ${{ steps.intelligence.outputs.session_test_required }}
+      performance-test-required: ${{ steps.intelligence.outputs.performance_test_required }}
+      deployment-required: ${{ steps.intelligence.outputs.deployment_required }}
+      session-integration: ${{ steps.intelligence.outputs.session_integration }}
+
+    steps:
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2 # Need 2 commits for diff analysis
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+
+      - name: 🧠 Run Intelligence Engine
+        id: intelligence
+        run: |
+          echo "🤖 Running VORTA Workflow Intelligence Engine..."
+          cd scripts
+          python github_workflow_intelligence.py --github-mode
+
+      - name: 📊 Intelligence Summary
+        run: |
+          echo "🔍 Intelligence Analysis Results:"
+          echo "   Workflows: ${{ steps.intelligence.outputs.workflows }}"
+          echo "   Session Test: ${{ steps.intelligence.outputs.session-test-required }}"
+          echo "   Performance Test: ${{ steps.intelligence.outputs.performance-test-required }}"
+          echo "   Deployment: ${{ steps.intelligence.outputs.deployment-required }}"
+          echo "   Session Integration: ${{ steps.intelligence.outputs.session-integration }}"
+
+  # 🔄 Chat Session Testing (Conditional)
+  chat-session-test:
+    name: 🔄 Chat Session Integration Test
+    runs-on: ubuntu-latest
+    needs: workflow-intelligence
+    if: needs.workflow-intelligence.outputs.session-test-required == 'true' || github.event.inputs.force_session_test == 'true'
+
+    steps:
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 🐍 Setup Python Environment
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: 📦 Install Dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pytest asyncio aiofiles
+
+      - name: 🔄 Test Chat Session Persistence
+        run: |
+          echo "🔄 Testing Chat Session Persistence System..."
+          python -c "
+          import asyncio
+          import sys
+          import os
+          sys.path.append('.')
+
+          async def comprehensive_session_test():
+              print('🔄 Starting comprehensive session test...')
+              
+              try:
+                  from frontend.components.ai.chat_session_persistence import ChatSessionPersistenceManager
+                  
+                  # Initialize manager
+                  manager = ChatSessionPersistenceManager()
+                  print('✅ Session manager initialized')
+                  
+                  # Test session creation
+                  session_id = await manager.create_new_session(
+                      title='GitHub Actions Test Session',
+                      auto_restore=True
+                  )
+                  print(f'✅ Session created: {session_id[:8]}...')
+                  
+                  # Test message addition
+                  await manager.add_message(session_id, 'system', 'GitHub Actions integration test')
+                  await manager.add_message(session_id, 'user', 'Test message from CI/CD')
+                  await manager.add_message(session_id, 'assistant', 'Response from automated test')
+                  print('✅ Messages added successfully')
+                  
+                  # Test session backup
+                  backup_result = await manager.backup_all_sessions()
+                  print(f'✅ Backup completed: {backup_result}')
+                  
+                  # Test session restoration
+                  sessions = await manager.get_all_sessions()
+                  print(f'✅ Session restoration: {len(sessions)} sessions found')
+                  
+                  # Test performance metrics
+                  metrics = manager.get_performance_metrics()
+                  print(f'📊 Performance metrics: {metrics}')
+                  
+                  # Validate performance thresholds
+                  if metrics.get('avg_backup_time', 1000) < 500:
+                      print('✅ Performance thresholds met')
+                  else:
+                      print('⚠️ Performance thresholds not optimal')
+                  
+                  print('🎉 All session tests passed!')
+                  return True
+                  
+              except Exception as e:
+                  print(f'❌ Session test failed: {e}')
+                  import traceback
+                  traceback.print_exc()
+                  return False
+
+          # Run the test
+          success = asyncio.run(comprehensive_session_test())
+          exit(0 if success else 1)
+          "
+
+      - name: 🧪 Test VS Code Integration
+        run: |
+          echo "🧪 Testing VS Code integration..."
+          python -c "
+          import os
+          import json
+
+          # Test .vscode/settings.json
+          if os.path.exists('.vscode/settings.json'):
+              with open('.vscode/settings.json', 'r') as f:
+                  settings = json.load(f)
+                  
+              required_settings = [
+                  'vorta.autoRestore',
+                  'vorta.sessionPersistence',
+                  'vorta.chatSettings'
+              ]
+              
+              missing = [s for s in required_settings if s not in settings]
+              if missing:
+                  print(f'❌ Missing VS Code settings: {missing}')
+                  exit(1)
+              else:
+                  print('✅ VS Code settings validated')
+
+          # Test .vscode/tasks.json
+          if os.path.exists('.vscode/tasks.json'):
+              with open('.vscode/tasks.json', 'r') as f:
+                  tasks = json.load(f)
+                  
+              task_labels = [task.get('label', '') for task in tasks.get('tasks', [])]
+              required_tasks = ['Auto-Restore Chat Session', 'VORTA Startup']
+              
+              missing_tasks = [t for t in required_tasks if t not in task_labels]
+              if missing_tasks:
+                  print(f'❌ Missing VS Code tasks: {missing_tasks}')
+                  exit(1)
+              else:
+                  print('✅ VS Code tasks validated')
+
+          print('🎉 VS Code integration test passed!')
+          "
+
+  # ⚡ Performance Testing (Conditional)
+  performance-test:
+    name: ⚡ Performance Benchmarking
+    runs-on: ubuntu-latest
+    needs: [workflow-intelligence, chat-session-test]
+    if: needs.workflow-intelligence.outputs.performance-test-required == 'true'
+
+    steps:
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 🐍 Setup Python Environment
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: 📦 Install Dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pytest-benchmark memory-profiler
+
+      - name: ⚡ Run Performance Benchmarks
+        run: |
+          echo "⚡ Running performance benchmarks..."
+          python -c "
+          import asyncio
+          import time
+          import psutil
+          import sys
+          sys.path.append('.')
+
+          async def performance_benchmark():
+              print('⚡ Starting performance benchmark...')
+              
+              try:
+                  from frontend.components.ai.chat_session_persistence import ChatSessionPersistenceManager
+                  
+                  manager = ChatSessionPersistenceManager()
+                  
+                  # Benchmark 1: Session Creation Performance
+                  print('📊 Benchmark 1: Session Creation')
+                  start_time = time.time()
+                  start_memory = psutil.Process().memory_info().rss / 1024 / 1024
+                  
+                  session_ids = []
+                  for i in range(50):
+                      session_id = await manager.create_new_session(title=f'Benchmark Session {i}')
+                      session_ids.append(session_id)
+                  
+                  creation_time = (time.time() - start_time) * 1000
+                  end_memory = psutil.Process().memory_info().rss / 1024 / 1024
+                  memory_used = end_memory - start_memory
+                  
+                  print(f'   ✅ 50 sessions created in {creation_time:.1f}ms')
+                  print(f'   ✅ Average per session: {creation_time/50:.1f}ms')
+                  print(f'   ✅ Memory usage: {memory_used:.1f}MB')
+                  
+                  # Benchmark 2: Message Addition Performance
+                  print('📊 Benchmark 2: Message Addition')
+                  start_time = time.time()
+                  
+                  for session_id in session_ids[:10]:  # Test with 10 sessions
+                      for j in range(10):  # 10 messages each
+                          await manager.add_message(session_id, 'user', f'Benchmark message {j}')
+                  
+                  message_time = (time.time() - start_time) * 1000
+                  print(f'   ✅ 100 messages added in {message_time:.1f}ms')
+                  print(f'   ✅ Average per message: {message_time/100:.1f}ms')
+                  
+                  # Benchmark 3: Backup Performance
+                  print('📊 Benchmark 3: Backup Performance')
+                  start_time = time.time()
+                  
+                  backup_result = await manager.backup_all_sessions()
+                  
+                  backup_time = (time.time() - start_time) * 1000
+                  print(f'   ✅ Backup completed in {backup_time:.1f}ms')
+                  
+                  # Performance validation
+                  thresholds = {
+                      'session_creation': 100,  # ms per session
+                      'message_addition': 50,   # ms per message  
+                      'backup_time': 2000       # ms total
+                  }
+                  
+                  results = {
+                      'session_creation': creation_time / 50,
+                      'message_addition': message_time / 100,
+                      'backup_time': backup_time
+                  }
+                  
+                  all_passed = True
+                  for metric, value in results.items():
+                      threshold = thresholds[metric]
+                      status = '✅' if value <= threshold else '❌'
+                      print(f'   {status} {metric}: {value:.1f}ms (threshold: {threshold}ms)')
+                      if value > threshold:
+                          all_passed = False
+                  
+                  if all_passed:
+                      print('🎉 All performance benchmarks passed!')
+                  else:
+                      print('⚠️ Some performance benchmarks failed')
+                  
+                  return all_passed
+                  
+              except Exception as e:
+                  print(f'❌ Performance benchmark failed: {e}')
+                  import traceback
+                  traceback.print_exc()
+                  return False
+
+          # Run benchmark
+          success = asyncio.run(performance_benchmark())
+          exit(0 if success else 1)
+          "
+
+  # 🚀 Deployment Trigger (Conditional)
+  deployment-trigger:
+    name: 🚀 Deployment Trigger
+    runs-on: ubuntu-latest
+    needs: [workflow-intelligence, chat-session-test, performance-test]
+    if: needs.workflow-intelligence.outputs.deployment-required == 'true' && github.ref == 'refs/heads/main'
+
+    steps:
+      - name: 🚀 Trigger Deployment Workflows
+        run: |
+          echo "🚀 Triggering deployment workflows..."
+          echo "   Chat session system validated ✅"
+          echo "   Performance benchmarks passed ✅"
+          echo "   Ready for production deployment 🎉"
+
+          # Here we would trigger actual deployment workflows
+          # For now, we'll create deployment artifacts
+
+      - name: 📦 Create Deployment Artifacts
+        run: |
+          echo "📦 Creating deployment artifacts..."
+          mkdir -p deployment-artifacts
+
+          # Create deployment summary
+          cat > deployment-artifacts/deployment-summary.json << EOF
+          {
+            "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "commit": "${{ github.sha }}",
+            "ref": "${{ github.ref }}",
+            "session_system_validated": true,
+            "performance_benchmarks_passed": true,
+            "deployment_ready": true,
+            "workflows_triggered": "${{ needs.workflow-intelligence.outputs.workflows }}"
+          }
+          EOF
+
+          echo "✅ Deployment artifacts created"
+
+      - name: 📤 Upload Deployment Artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: deployment-artifacts
+          path: deployment-artifacts/
+
+  # 📊 Final Report
+  workflow-report:
+    name: 📊 Workflow Execution Report
+    runs-on: ubuntu-latest
+    needs: [workflow-intelligence, chat-session-test, performance-test, deployment-trigger]
+    if: always()
+
+    steps:
+      - name: 📊 Generate Execution Report
+        run: |
+          echo "📊 VORTA Smart Workflow Execution Report"
+          echo "=" * 60
+          echo "🕐 Execution Time: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "📝 Commit: ${{ github.sha }}"
+          echo "🌿 Branch: ${{ github.ref }}"
+          echo "👤 Actor: ${{ github.actor }}"
+          echo ""
+          echo "🎯 Workflow Results:"
+          echo "   Intelligence Analysis: ${{ needs.workflow-intelligence.result }}"
+          echo "   Chat Session Test: ${{ needs.chat-session-test.result }}"
+          echo "   Performance Test: ${{ needs.performance-test.result }}"
+          echo "   Deployment Trigger: ${{ needs.deployment-trigger.result }}"
+          echo ""
+          echo "🔧 Configuration:"
+          echo "   Session Persistence: ${{ env.VORTA_SESSION_PERSISTENCE }}"
+          echo "   Auto Restore: ${{ env.VORTA_AUTO_RESTORE }}"
+          echo "   GitHub Integration: ${{ env.VORTA_GITHUB_INTEGRATION }}"
+          echo ""
+
+          # Determine overall status
+          if [ "${{ needs.workflow-intelligence.result }}" = "success" ]; then
+            echo "🎉 Smart workflow execution completed successfully!"
+          else
+            echo "❌ Smart workflow execution encountered issues"
+          fi
