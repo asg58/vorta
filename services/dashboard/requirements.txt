@@ -73,3 +73,4 @@ nltk>=3.8.1
 spacy>=3.7.2
 pillow>=10.0.1
 opencv-python>=4.8.1.78
+anthropic>=2.8.0

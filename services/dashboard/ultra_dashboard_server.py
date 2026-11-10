@@ -66,6 +66,11 @@ except ImportError as e:
     raise RuntimeError(f"FATAL: UltraAGIVoiceAgent not available: {e}. Mock usage is FORBIDDEN! "
                       f"Real components must be installed and available.")
 
+try:
+    from shared.ai.claude_brain import BrainError, get_brain
+except ImportError as e:
+    raise RuntimeError(f"FATAL: Claude brain not available: {e}. Install the 'anthropic' package.")
+
 # Configure ultra-professional logging
 logging.basicConfig(
     level=logging.INFO,
@@ -117,6 +122,7 @@ class UltraDashboardState:
         self.analytics_engine = None
         self.edge_network = None
         self.connected_clients = {}
+        self.chat_histories: Dict[str, List[Dict[str, str]]] = {}
         self.system_metrics = {}
         self.voice_sessions = {}
         self.agi_agents = {}  # Store Ultra AGI Voice Agents per session
@@ -569,24 +575,23 @@ async def ultra_agi_voice_processing(request: VoiceUploadRequest):
 async def chat_conversation(request: ChatRequest):
     """Process chat conversation with AI"""
     try:
-        # Simulate AI conversation processing
-        responses = [
-            "I understand your question. Let me help you with that.",
-            "That's an interesting point. Here's what I think about it.",
-            "Based on our conversation, I would recommend the following approach.",
-            "I'm here to assist you with any questions you might have.",
-            "Thank you for sharing that information. Let me process it."
-        ]
-        
-        import random
-        ai_response = random.choice(responses)
-        
+        session_id = request.session_id or str(uuid.uuid4())
+        history = dashboard_state.chat_histories.setdefault(session_id, [])
+        started = time.time()
+
+        reply = await get_brain().reply(
+            history + [{"role": "user", "content": request.message}]
+        )
+        ai_response = reply.text
+        history.append({"role": "user", "content": request.message})
+        history.append({"role": "assistant", "content": ai_response})
+
         result = {
-            "session_id": request.session_id or str(uuid.uuid4()),
+            "session_id": session_id,
             "user_message": request.message,
             "ai_response": ai_response,
-            "confidence": 0.92,
-            "processing_time": 0.420,
+            "model": reply.model,
+            "processing_time": round(time.time() - started, 3),
             "timestamp": datetime.now().isoformat(),
             "status": "success"
         }
@@ -594,6 +599,9 @@ async def chat_conversation(request: ChatRequest):
         logger.info(f"Chat processed: '{request.message[:50]}...'")
         return result
         
+    except BrainError as e:
+        logger.error(f"Chat brain unavailable: {e}")
+        raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
         logger.error(f"Chat processing error: {e}")
         raise HTTPException(status_code=500, detail=f"Chat processing failed: {str(e)}")

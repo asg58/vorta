@@ -31,7 +31,7 @@ except ImportError:
 
 # Import VORTA components
 from ..config.settings import Settings
-from .inference_engine import VortaInferenceEngine
+from .conversation_engine import VortaInferenceEngine
 from .speech_recognition import WhisperSpeechRecognizer
 from .tts_service import TTSProvider, VortaTTSService
 

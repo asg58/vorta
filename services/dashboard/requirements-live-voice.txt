@@ -25,3 +25,6 @@ scipy>=1.11.0
 
 # WebRTC Support
 aiortc>=1.6.0
+
+# Conversation brain (Claude)
+anthropic>=2.8.0
