@@ -62,6 +62,9 @@ services:
       - TTS_MODEL=ultra_high_quality
       - STT_MODEL=whisper_large_v3
       - AI_MODEL=gpt4_turbo_enhanced
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - VORTA_LLM_MODEL=${VORTA_LLM_MODEL:-claude-fable-5-2}
+      - VORTA_LLM_EFFORT=${VORTA_LLM_EFFORT:-low}
     volumes:
       - ./services/dashboard:/app
       - ./shared:/app/shared:ro
@@ -97,6 +100,9 @@ services:
       - PROCESSING_TIMEOUT=30 # 30 second timeout
       - VOICE_QUALITY=ultra_high
       - LATENCY_TARGET=1500 # <1.5s end-to-end
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - VORTA_LLM_MODEL=${VORTA_LLM_MODEL:-claude-fable-5-2}
+      - VORTA_LLM_EFFORT=${VORTA_LLM_EFFORT:-low}
     volumes:
       - ./services/inference-engine:/app
       - ./shared:/app/shared:ro
